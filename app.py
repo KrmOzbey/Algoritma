@@ -14,65 +14,75 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# RENK PALETİ TANIMLARI
-COLOR_DARK_BLUE = "#326789"
-COLOR_MED_BLUE = "#78A6C8"
-COLOR_BG_LIGHT = "#E9EEF2"
-COLOR_ACCENT_RED = "#E65C4F"
+# --- RENK PALETİ TANIMLARI ---
+COLOR_BG_LIGHT = "#E3F2FD"      # Ana Arka Plan (Açık Mavi)
+COLOR_SIDEBAR_BG = "#154360"    # Sidebar Arka Planı (Koyu Mavi)
+COLOR_TEXT_MAIN = "#154360"     # Ana Ekran Yazıları (Koyu Mavi)
+COLOR_TEXT_SIDEBAR = "#FFFFFF"  # Sidebar Yazıları (Beyaz)
+COLOR_ACCENT_RED = "#C0392B"    # Vurgu/Buton Rengi (Kırmızı)
+COLOR_WHITE = "#FFFFFF"         # Kartlar ve Grafik İçi Beyazlar
 
-# Özel CSS ile Renk Paleti Uygulaması
+# Özel CSS
 st.markdown(f"""
     <style>
-        /* Genel Arka Plan */
+        /* 1. Genel Sayfa Arka Planı */
         .stApp {{
             background-color: {COLOR_BG_LIGHT};
         }}
         
-        /* Sidebar Stili */
+        /* 2. Sidebar (Sol Panel) Ayarları */
         [data-testid="stSidebar"] {{
-            background-color: #ffffff;
-            border-right: 1px solid {COLOR_MED_BLUE};
+            background-color: {COLOR_SIDEBAR_BG};
+            color: {COLOR_TEXT_SIDEBAR};
         }}
         
-        /* Başlıklar */
+        /* Sidebar içindeki başlıklar ve yazılar beyaz olsun */
+        [data-testid="stSidebar"] h1, [data-testid="stSidebar"] h2, [data-testid="stSidebar"] h3 {{
+            color: {COLOR_TEXT_SIDEBAR} !important;
+        }}
+        [data-testid="stSidebar"] p, [data-testid="stSidebar"] label, [data-testid="stSidebar"] span {{
+            color: {COLOR_TEXT_SIDEBAR} !important;
+        }}
+        
+        /* 3. Ana Ekran Başlıkları (Koyu Mavi) */
         h1, h2, h3, h4, h5 {{
-            color: {COLOR_DARK_BLUE} !important;
-            font-family: 'Helvetica Neue', sans-serif;
+            color: {COLOR_TEXT_MAIN} !important;
+            font-family: 'Segoe UI', sans-serif;
         }}
         
-        /* Metinler */
-        p, label, span {{
-            color: #2c3e50;
-        }}
-        
-        /* Tablo Stili */
+        /* 4. Tablo ve Kartlar */
         [data-testid="stDataFrame"] {{
-            background-color: #ffffff;
-            border: 1px solid {COLOR_MED_BLUE};
-            border-radius: 8px;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+            background-color: {COLOR_WHITE};
+            border: 2px solid {COLOR_SIDEBAR_BG};
+            border-radius: 10px;
         }}
         
-        /* Buton Stili (Accent Red) */
+        /* 5. Buton Stili (Kırmızı) */
         div.stButton > button {{
             background-color: {COLOR_ACCENT_RED};
-            color: white;
+            color: {COLOR_WHITE};
             border: none;
-            border-radius: 6px;
+            border-radius: 8px;
             padding: 0.6rem 1rem;
-            font-weight: 600;
+            font-weight: bold;
             width: 100%;
-            transition: all 0.2s ease;
+            transition: 0.3s;
         }}
         div.stButton > button:hover {{
-            background-color: #c0392b;
-            box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+            background-color: #A93226; /* Daha koyu kırmızı */
+            color: {COLOR_WHITE};
         }}
         
-        /* Expander ve Kutular */
+        /* 6. Expander (Açılır Menü) Başlıkları */
         .streamlit-expanderHeader {{
-            color: {COLOR_DARK_BLUE};
-            font-weight: bold;
+            color: {COLOR_TEXT_MAIN} !important; /* Ana ekranda koyu mavi */
+            background-color: {COLOR_WHITE};
+            border-radius: 5px;
+        }}
+        
+        /* Sidebar içindeki expanderların rengini düzeltme */
+        [data-testid="stSidebar"] .streamlit-expanderHeader {{
+            color: {COLOR_SIDEBAR_BG} !important;
         }}
     </style>
 """, unsafe_allow_html=True)
@@ -177,10 +187,12 @@ def create_graph(num_nodes, k_neighbors, min_w, max_w):
             G.add_edge(u, v, weight=random.randint(min_w, max_w))
     return G, pos
 
-# --- 3. SIDEBAR (Kontrol Paneli) ---
+# --- 3. SIDEBAR (Kontrol Paneli - Koyu Mavi) ---
 with st.sidebar:
+    # Logo veya Başlık
     st.image("https://upload.wikimedia.org/wikipedia/tr/6/62/Gazi_%C3%9Cniversitesi_Logosu.png", width=100)
     st.title("Algoritma Labı")
+    st.markdown("---")
     
     st.markdown("### ⚙️ Ayarlar")
     
@@ -194,14 +206,14 @@ with st.sidebar:
         min_w = st.number_input("Min Ağırlık", 1, 50, 1)
         max_w = st.number_input("Max Ağırlık", 1, 50, 20)
     
-    # Görselleştirme Seçimi
     st.markdown("### 👁️ Görünüm")
     selected_algo_view = st.selectbox(
-        "Gösterilecek Rota:",
-        ["Karşılaştırmalı (Hepsi)", "Sadece Dijkstra (Mavi)", "Sadece A* (Kırmızı)", "Sadece Bellman-Ford (Mor)"]
+        "Rotayı Göster:",
+        ["Karşılaştırmalı (Hepsi)", "Sadece Dijkstra", "Sadece A*", "Sadece Bellman-Ford"]
     )
     
     st.markdown("---")
+    # Kırmızı Buton (CSS ile ayarlandı)
     if st.button("🔄 Haritayı Yeniden Oluştur"):
         st.session_state['G'], st.session_state['pos'] = create_graph(node_count, edge_density, min_w, max_w)
         st.rerun()
@@ -233,7 +245,7 @@ a_time = (time.perf_counter() - t1) * 1000
 results.append({"Algoritma": "A*", "Süre (ms)": a_time, "Maliyet": a_cost, "Genişletilen": a_exp, "Yol": a_path})
 
 # Bellman-Ford
-if node_count <= 200: # Performans için limit
+if node_count <= 200: 
     t1 = time.perf_counter()
     b_cost, b_path, b_exp = bellman_ford_algo(G, start_node, end_node)
     b_time = (time.perf_counter() - t1) * 1000
@@ -243,22 +255,22 @@ else:
 
 df_res = pd.DataFrame(results)
 
-# --- BÖLÜM 1: HARİTA (Tam Genişlik) ---
+# --- BÖLÜM 1: HARİTA (Geniş) ---
 st.subheader("📍 Simülasyon Haritası")
 
-# Grafik Ayarları (Palete Uygun)
-plt.figure(figsize=(14, 6)) # Daha geniş ve büyük harita
+# Grafik Ayarları (Açık Mavi Arka Plan)
+plt.figure(figsize=(14, 6))
 fig, ax = plt.subplots(figsize=(14, 6))
-fig.patch.set_facecolor(COLOR_BG_LIGHT) # Arka plan rengi
+fig.patch.set_facecolor(COLOR_BG_LIGHT)
 ax.set_facecolor(COLOR_BG_LIGHT)
 
 # Ağ Çizimi
-# Düğümler: Koyu Mavi, Kenarlar: Orta Mavi
-nx.draw_networkx_nodes(G, pos, node_size=40, node_color=COLOR_DARK_BLUE, ax=ax, alpha=0.8)
-nx.draw_networkx_edges(G, pos, edge_color=COLOR_MED_BLUE, alpha=0.3, ax=ax)
+# Düğümler: Koyu Mavi, Kenarlar: Beyazımsı/Gri
+nx.draw_networkx_nodes(G, pos, node_size=50, node_color=COLOR_SIDEBAR_BG, ax=ax, alpha=0.9)
+nx.draw_networkx_edges(G, pos, edge_color="#B0BEC5", alpha=0.5, ax=ax)
 
-# Başlangıç (Yeşil) ve Bitiş (Kiremit Kırmızısı)
-nx.draw_networkx_nodes(G, pos, nodelist=[start_node], node_color='#2ecc71', node_size=200, ax=ax, label="Başlangıç")
+# Başlangıç ve Bitiş (Kırmızı ve Yeşil yerine Beyaz/Kırmızı kontrastı)
+nx.draw_networkx_nodes(G, pos, nodelist=[start_node], node_color=COLOR_WHITE, edgecolors=COLOR_SIDEBAR_BG, linewidths=2, node_size=200, ax=ax, label="Başlangıç")
 nx.draw_networkx_nodes(G, pos, nodelist=[end_node], node_color=COLOR_ACCENT_RED, node_size=200, ax=ax, label="Hedef")
 
 path_width = 3
@@ -267,64 +279,49 @@ path_width = 3
 if "Dijkstra" in selected_algo_view or "Hepsi" in selected_algo_view:
     if d_path:
         edges = list(zip(d_path, d_path[1:]))
-        # Dijkstra: Koyu Mavi Rota
-        nx.draw_networkx_edges(G, pos, edgelist=edges, edge_color=COLOR_DARK_BLUE, width=path_width+2, alpha=0.5, label="Dijkstra", ax=ax)
+        nx.draw_networkx_edges(G, pos, edgelist=edges, edge_color=COLOR_SIDEBAR_BG, width=path_width+2, alpha=0.6, label="Dijkstra", ax=ax)
         
 if "Bellman" in selected_algo_view or "Hepsi" in selected_algo_view:
     if len(results) > 2 and results[2]["Yol"]:
         path = results[2]["Yol"]
         edges = list(zip(path, path[1:]))
-        # Bellman: Morumsu (Palet dışı kontrast için)
-        nx.draw_networkx_edges(G, pos, edgelist=edges, edge_color='#9b59b6', width=path_width, style='dotted', label="Bellman-Ford", ax=ax)
+        nx.draw_networkx_edges(G, pos, edgelist=edges, edge_color='#8E44AD', width=path_width, style='dotted', label="Bellman-Ford", ax=ax)
 
 if "A*" in selected_algo_view or "Hepsi" in selected_algo_view:
     if a_path:
         edges = list(zip(a_path, a_path[1:]))
-        # A*: Paletteki Kiremit Rengi (Hata varsa Sarı)
-        color = '#f1c40f' if a_cost > d_cost else COLOR_ACCENT_RED
+        color = '#F39C12' if a_cost > d_cost else COLOR_ACCENT_RED
         style = 'dashed'
         nx.draw_networkx_edges(G, pos, edgelist=edges, edge_color=color, width=path_width, style=style, label="A*", ax=ax)
 
-ax.legend(loc='upper left', frameon=True, facecolor='white', edgecolor=COLOR_MED_BLUE)
+ax.legend(loc='upper left', frameon=True, facecolor=COLOR_WHITE, edgecolor=COLOR_SIDEBAR_BG)
 ax.axis('off')
 st.pyplot(fig, use_container_width=True)
 
-# Harita altı mesaj
 if a_cost > d_cost:
-    st.warning(f"⚠️ A* Algoritması {a_cost - d_cost:.1f} birim daha maliyetli bir yol buldu! (Heuristic Yanılgısı)")
+    st.error(f"⚠️ A* Algoritması {a_cost - d_cost:.1f} birim daha maliyetli bir yol buldu! (Heuristic Yanılgısı)")
 
 st.divider()
 
-# --- BÖLÜM 2: PERFORMANS ANALİZİ (Yan Yana) ---
+# --- BÖLÜM 2: ANALİZ ---
 st.subheader("📊 Performans Analizi")
 
 col_stats, col_charts = st.columns([1, 1], gap="large")
 
 with col_stats:
     st.markdown("##### 📝 Sonuç Tablosu")
-    # Tabloyu stilize et
     st.dataframe(
         df_res[["Algoritma", "Süre (ms)", "Maliyet", "Genişletilen"]].style.format({"Süre (ms)": "{:.2f}"}),
         use_container_width=True,
         hide_index=True
     )
-    
-    st.info("""
-    **Tablo Yorumu:**
-    * **Süre:** Algoritmanın çalışma hızı. A* genellikle en hızlıdır.
-    * **Maliyet:** Bulunan yolun toplam uzunluğu.
-    * **Genişletilen:** Algoritmanın kaç şehri ziyaret ettiği.
-    """)
 
 with col_charts:
     st.markdown("##### ⏱️ Grafiksel Karşılaştırma")
-    
     tab1, tab2 = st.tabs(["Zaman (ms)", "İşlem Yükü"])
     
     with tab1:
-        # Renk paletindeki Koyu Maviyi kullan
-        st.bar_chart(df_res.set_index("Algoritma")["Süre (ms)"], color=COLOR_DARK_BLUE)
+        st.bar_chart(df_res.set_index("Algoritma")["Süre (ms)"], color=COLOR_SIDEBAR_BG)
         
     with tab2:
-        # Renk paletindeki Kiremit Rengini kullan
         st.bar_chart(df_res.set_index("Algoritma")["Genişletilen"], color=COLOR_ACCENT_RED)
