@@ -14,15 +14,15 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# --- RENK PALETİ TANIMLARI ---
+# --- RENK PALETİ ---
 COLOR_BG_LIGHT = "#E3F2FD"      # Ana Arka Plan (Açık Mavi)
 COLOR_SIDEBAR_BG = "#154360"    # Sidebar Arka Planı (Koyu Mavi)
-COLOR_TEXT_MAIN = "#154360"     # Ana Ekran Yazıları (Koyu Mavi)
-COLOR_TEXT_SIDEBAR = "#FFFFFF"  # Sidebar Yazıları (Beyaz)
-COLOR_ACCENT_RED = "#C0392B"    # Vurgu/Buton Rengi (Kırmızı)
-COLOR_WHITE = "#FFFFFF"         # Kartlar ve Grafik İçi Beyazlar
+COLOR_TEXT_MAIN = "#000000"     # Ana Ekran Yazıları (TAM SİYAH)
+COLOR_TEXT_SIDEBAR = "#FFFFFF"  # Sidebar Yazıları (Beyaz - Koyu zemin üstüne)
+COLOR_ACCENT_RED = "#C0392B"    # Butonlar (Kırmızı)
+COLOR_WHITE = "#FFFFFF"         # Grafik Arka Planları
 
-# Özel CSS
+# Özel CSS (Yazı Rengi Güncellemesi)
 st.markdown(f"""
     <style>
         /* 1. Genel Sayfa Arka Planı */
@@ -30,59 +30,50 @@ st.markdown(f"""
             background-color: {COLOR_BG_LIGHT};
         }}
         
-        /* 2. Sidebar (Sol Panel) Ayarları */
-        [data-testid="stSidebar"] {{
-            background-color: {COLOR_SIDEBAR_BG};
-            color: {COLOR_TEXT_SIDEBAR};
-        }}
-        
-        /* Sidebar içindeki başlıklar ve yazılar beyaz olsun */
-        [data-testid="stSidebar"] h1, [data-testid="stSidebar"] h2, [data-testid="stSidebar"] h3 {{
-            color: {COLOR_TEXT_SIDEBAR} !important;
-        }}
-        [data-testid="stSidebar"] p, [data-testid="stSidebar"] label, [data-testid="stSidebar"] span {{
-            color: {COLOR_TEXT_SIDEBAR} !important;
-        }}
-        
-        /* 3. Ana Ekran Başlıkları (Koyu Mavi) */
-        h1, h2, h3, h4, h5 {{
+        /* 2. ANA EKRAN YAZILARI (SİYAH) */
+        h1, h2, h3, h4, h5, p, div, span, label, li {{
             color: {COLOR_TEXT_MAIN} !important;
             font-family: 'Segoe UI', sans-serif;
         }}
         
-        /* 4. Tablo ve Kartlar */
-        [data-testid="stDataFrame"] {{
-            background-color: {COLOR_WHITE};
-            border: 2px solid {COLOR_SIDEBAR_BG};
-            border-radius: 10px;
+        /* 3. Sidebar İstisnası (Zemin koyu olduğu için yazı beyaz kalmalı) */
+        [data-testid="stSidebar"] * {{
+            color: {COLOR_TEXT_SIDEBAR} !important;
+        }}
+        [data-testid="stSidebar"] {{
+            background-color: {COLOR_SIDEBAR_BG};
         }}
         
-        /* 5. Buton Stili (Kırmızı) */
+        /* 4. Tablo Stili */
+        [data-testid="stDataFrame"] {{
+            background-color: {COLOR_WHITE};
+            border: 2px solid #B0BEC5;
+            border-radius: 8px;
+        }}
+        
+        /* Tablo içindeki yazılar da siyah olsun */
+        [data-testid="stDataFrame"] * {{
+            color: black !important;
+        }}
+        
+        /* 5. Buton Stili */
         div.stButton > button {{
             background-color: {COLOR_ACCENT_RED};
-            color: {COLOR_WHITE};
+            color: white !important; /* Buton içi yazı beyaz */
             border: none;
-            border-radius: 8px;
-            padding: 0.6rem 1rem;
+            border-radius: 6px;
             font-weight: bold;
-            width: 100%;
             transition: 0.3s;
         }}
         div.stButton > button:hover {{
-            background-color: #A93226; /* Daha koyu kırmızı */
-            color: {COLOR_WHITE};
+            background-color: #A93226;
         }}
         
-        /* 6. Expander (Açılır Menü) Başlıkları */
+        /* 6. Expander Başlıkları */
         .streamlit-expanderHeader {{
-            color: {COLOR_TEXT_MAIN} !important; /* Ana ekranda koyu mavi */
-            background-color: {COLOR_WHITE};
+            background-color: white;
+            color: black !important;
             border-radius: 5px;
-        }}
-        
-        /* Sidebar içindeki expanderların rengini düzeltme */
-        [data-testid="stSidebar"] .streamlit-expanderHeader {{
-            color: {COLOR_SIDEBAR_BG} !important;
         }}
     </style>
 """, unsafe_allow_html=True)
@@ -187,21 +178,18 @@ def create_graph(num_nodes, k_neighbors, min_w, max_w):
             G.add_edge(u, v, weight=random.randint(min_w, max_w))
     return G, pos
 
-# --- 3. SIDEBAR (Kontrol Paneli - Koyu Mavi) ---
+# --- 3. SIDEBAR ---
 with st.sidebar:
-    # Logo veya Başlık
     st.image("https://upload.wikimedia.org/wikipedia/tr/6/62/Gazi_%C3%9Cniversitesi_Logosu.png", width=100)
     st.title("Algoritma Labı")
     st.markdown("---")
     
     st.markdown("### ⚙️ Ayarlar")
     
-    # Harita Ayarları
     with st.expander("🌍 Harita Konfigürasyonu", expanded=True):
         node_count = st.slider("Şehir Sayısı", 20, 300, 100)
         edge_density = st.slider("Bağlantı Yoğunluğu", 2, 8, 4)
     
-    # Ağırlık Ayarları
     with st.expander("⚖️ Yol Maliyetleri", expanded=False):
         min_w = st.number_input("Min Ağırlık", 1, 50, 1)
         max_w = st.number_input("Max Ağırlık", 1, 50, 20)
@@ -213,12 +201,11 @@ with st.sidebar:
     )
     
     st.markdown("---")
-    # Kırmızı Buton (CSS ile ayarlandı)
     if st.button("🔄 Haritayı Yeniden Oluştur"):
         st.session_state['G'], st.session_state['pos'] = create_graph(node_count, edge_density, min_w, max_w)
         st.rerun()
 
-# --- 4. ANA EKRAN MANTIĞI ---
+# --- 4. ANA EKRAN ---
 
 if 'G' not in st.session_state:
     st.session_state['G'], st.session_state['pos'] = create_graph(node_count, edge_density, min_w, max_w)
@@ -229,7 +216,7 @@ nodes = list(G.nodes)
 start_node = nodes[0]
 end_node = nodes[-1]
 
-# Algoritmaları Hesapla
+# Hesaplamalar
 results = []
 
 # Dijkstra
@@ -255,27 +242,25 @@ else:
 
 df_res = pd.DataFrame(results)
 
-# --- BÖLÜM 1: HARİTA (Geniş) ---
+# --- HARİTA GÖRSELLEŞTİRME (SİYAH YAZI İLE) ---
 st.subheader("📍 Simülasyon Haritası")
 
-# Grafik Ayarları (Açık Mavi Arka Plan)
 plt.figure(figsize=(14, 6))
 fig, ax = plt.subplots(figsize=(14, 6))
 fig.patch.set_facecolor(COLOR_BG_LIGHT)
 ax.set_facecolor(COLOR_BG_LIGHT)
 
 # Ağ Çizimi
-# Düğümler: Koyu Mavi, Kenarlar: Beyazımsı/Gri
 nx.draw_networkx_nodes(G, pos, node_size=50, node_color=COLOR_SIDEBAR_BG, ax=ax, alpha=0.9)
-nx.draw_networkx_edges(G, pos, edge_color="#B0BEC5", alpha=0.5, ax=ax)
+nx.draw_networkx_edges(G, pos, edge_color="#90A4AE", alpha=0.5, ax=ax)
 
-# Başlangıç ve Bitiş (Kırmızı ve Yeşil yerine Beyaz/Kırmızı kontrastı)
-nx.draw_networkx_nodes(G, pos, nodelist=[start_node], node_color=COLOR_WHITE, edgecolors=COLOR_SIDEBAR_BG, linewidths=2, node_size=200, ax=ax, label="Başlangıç")
-nx.draw_networkx_nodes(G, pos, nodelist=[end_node], node_color=COLOR_ACCENT_RED, node_size=200, ax=ax, label="Hedef")
+# Başlangıç ve Bitiş
+nx.draw_networkx_nodes(G, pos, nodelist=[start_node], node_color="white", edgecolors="black", linewidths=2, node_size=200, ax=ax, label="Başlangıç")
+nx.draw_networkx_nodes(G, pos, nodelist=[end_node], node_color=COLOR_ACCENT_RED, edgecolors="black", linewidths=1, node_size=200, ax=ax, label="Hedef")
 
 path_width = 3
 
-# Rotaları Çiz
+# Rotalar
 if "Dijkstra" in selected_algo_view or "Hepsi" in selected_algo_view:
     if d_path:
         edges = list(zip(d_path, d_path[1:]))
@@ -294,7 +279,15 @@ if "A*" in selected_algo_view or "Hepsi" in selected_algo_view:
         style = 'dashed'
         nx.draw_networkx_edges(G, pos, edgelist=edges, edge_color=color, width=path_width, style=style, label="A*", ax=ax)
 
-ax.legend(loc='upper left', frameon=True, facecolor=COLOR_WHITE, edgecolor=COLOR_SIDEBAR_BG)
+# LEJANT AYARLARI (KRİTİK: YAZILAR SİYAH)
+legend = ax.legend(
+    loc='upper left', 
+    frameon=True, 
+    facecolor='white', 
+    edgecolor='black', 
+    labelcolor='black', # Yazı rengini siyah yapar
+    fontsize=10
+)
 ax.axis('off')
 st.pyplot(fig, use_container_width=True)
 
@@ -303,7 +296,7 @@ if a_cost > d_cost:
 
 st.divider()
 
-# --- BÖLÜM 2: ANALİZ ---
+# --- ANALİZ BÖLÜMÜ ---
 st.subheader("📊 Performans Analizi")
 
 col_stats, col_charts = st.columns([1, 1], gap="large")
