@@ -6,7 +6,7 @@ import random
 import math
 import heapq
 import time
-import altair as alt # Grafik kontrolü için eklendi
+import altair as alt
 
 # --- 1. SAYFA VE STİL AYARLARI ---
 st.set_page_config(
@@ -16,14 +16,15 @@ st.set_page_config(
 )
 
 # --- RENK PALETİ ---
-COLOR_BG_LIGHT = "#E3F2FD"      # Ana Arka Plan (Açık Mavi)
-COLOR_SIDEBAR_BG = "#154360"    # Sidebar Arka Planı (Koyu Mavi)
-COLOR_TEXT_MAIN = "#000000"     # Ana Ekran Yazıları (SİYAH)
-COLOR_TEXT_SIDEBAR = "#FFFFFF"  # Sidebar Yazıları (Beyaz)
-COLOR_ACCENT_RED = "#C0392B"    # Butonlar/Vurgular (Kırmızı)
-COLOR_NODE_BRIGHT = "#3498DB"   # Harita Düğüm Rengi (Canlı Mavi)
-COLOR_EDGE_LIGHT = "#CFD8DC"    # Harita Kenar Rengi (Açık Gri)
-COLOR_CHART_TEXT = "#546E7A"    # Grafik Yazı Rengi (Okunaklı Gri)
+COLOR_BG_LIGHT = "#E3F2FD"      # Ana Arka Plan
+COLOR_SIDEBAR_BG = "#154360"    # Sidebar Arka Planı
+COLOR_TEXT_MAIN = "#000000"     # Ana Ekran Yazıları
+COLOR_TEXT_SIDEBAR = "#ECEFF1"  # Sidebar Yazıları (Açık Gri/Beyaz - OKUNABİLİRLİK İÇİN)
+COLOR_ACCENT_RED = "#C0392B"    # Kırmızı Vurgular
+COLOR_NODE_BRIGHT = "#3498DB"   # Düğüm Rengi
+COLOR_EDGE_LIGHT = "#CFD8DC"    # Kenar Rengi
+COLOR_CHART_TEXT = "#546E7A"    # Ana Ekran Grafik Yazıları (Koyu Gri)
+COLOR_AXIS_TEXT = "#CFD8DC"     # Koyu zemin üstüne yazılacaksa Açık Gri
 
 # Özel CSS
 st.markdown(f"""
@@ -34,27 +35,32 @@ st.markdown(f"""
         }}
         
         /* 2. ANA EKRAN YAZILARI (SİYAH) */
-        h1, h2, h3, h4, h5, p, div, span, label, li {{
+        h1, h2, h3, h4, h5, p, span, li {{
             color: {COLOR_TEXT_MAIN} !important;
             font-family: 'Segoe UI', sans-serif;
         }}
         
-        /* 3. Sidebar İstisnası */
-        [data-testid="stSidebar"] * {{
-            color: {COLOR_TEXT_SIDEBAR} !important;
-        }}
+        /* 3. Sidebar Genel Ayarları */
         [data-testid="stSidebar"] {{
             background-color: {COLOR_SIDEBAR_BG};
         }}
         
-        /* 4. Tablo Stili */
-        [data-testid="stDataFrame"] {{
-            background-color: white;
-            border: 2px solid {COLOR_SIDEBAR_BG};
-            border-radius: 8px;
+        /* Sidebar'daki TÜM metinleri Açık Gri yap (Başlıklar, Label'lar) */
+        [data-testid="stSidebar"] h1, [data-testid="stSidebar"] h2, [data-testid="stSidebar"] h3, 
+        [data-testid="stSidebar"] label, [data-testid="stSidebar"] p, [data-testid="stSidebar"] div {{
+            color: {COLOR_TEXT_SIDEBAR} !important;
         }}
-        [data-testid="stDataFrame"] * {{
-            color: black !important;
+        
+        /* 4. SIDEBAR SELECTBOX DÜZELTMESİ (KRİTİK) */
+        /* Dropdown kutusunun içindeki seçili metni beyaz/gri yap */
+        [data-testid="stSidebar"] .stSelectbox div[data-baseweb="select"] div {{
+            color: {COLOR_TEXT_SIDEBAR} !important;
+            -webkit-text-fill-color: {COLOR_TEXT_SIDEBAR} !important;
+        }}
+        
+        /* Dropdown ok simgesini beyaz yap */
+        [data-testid="stSidebar"] .stSelectbox svg {{
+            fill: {COLOR_TEXT_SIDEBAR} !important;
         }}
         
         /* 5. Buton Stili */
@@ -73,20 +79,27 @@ st.markdown(f"""
         /* 6. Expander Başlıkları */
         .streamlit-expanderHeader {{
             background-color: white;
-            color: black !important;
+            color: black !important; /* Expander içi beyaz olduğu için yazı siyah kalsın */
             border-radius: 5px;
         }}
         
-        /* Harita Konteynerine gölge efekti */
+        /* Sidebar içindeki Expander başlıklarını düzelt */
+        [data-testid="stSidebar"] .streamlit-expanderHeader {{
+            color: {COLOR_SIDEBAR_BG} !important; /* Başlık koyu mavi olsun */
+            background-color: #ECEFF1;
+        }}
+        
+        /* Harita Konteyner */
         .map-container {{
-            box-shadow: 0 4px 8px rgba(0,0,0,0.1);
-            border-radius: 10px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+            border-radius: 12px;
             overflow: hidden;
+            border: 2px solid {COLOR_SIDEBAR_BG}; /* Harita Çerçevesi */
         }}
     </style>
 """, unsafe_allow_html=True)
 
-# --- 2. ALGORİTMA FONKSİYONLARI (Değişmedi) ---
+# --- 2. ALGORİTMA FONKSİYONLARI ---
 def euclidean_dist(node1, node2, positions):
     x1, y1 = positions[node1]
     x2, y2 = positions[node2]
@@ -253,25 +266,21 @@ df_res = pd.DataFrame(results)
 # --- HARİTA GÖRSELLEŞTİRME ---
 st.subheader("📍 Simülasyon Haritası")
 
-# Çerçeve efekti için bir container
 with st.container():
     st.markdown('<div class="map-container">', unsafe_allow_html=True)
     
     plt.figure(figsize=(14, 7))
     fig, ax = plt.subplots(figsize=(14, 7))
-    # Arka planı sayfa rengiyle aynı yap
     fig.patch.set_facecolor(COLOR_BG_LIGHT)
     ax.set_facecolor(COLOR_BG_LIGHT)
 
-    # Eksenleri kapat ama çerçeveyi (spines) aç ve renklendir
+    # Eksenleri kapat
     ax.set_xticks([])
     ax.set_yticks([])
     for spine in ax.spines.values():
-        spine.set_visible(True)
-        spine.set_color(COLOR_SIDEBAR_BG) # Çerçeve rengi koyu mavi
-        spine.set_linewidth(3) # Kalın çerçeve
+        spine.set_visible(False) # Matplotlib çerçevesini kapat (CSS çerçevesi var)
 
-    # Ağ Çizimi (Daha estetik renkler)
+    # Ağ Çizimi
     nx.draw_networkx_nodes(G, pos, node_size=60, node_color=COLOR_NODE_BRIGHT, ax=ax, alpha=0.9)
     nx.draw_networkx_edges(G, pos, edge_color=COLOR_EDGE_LIGHT, alpha=0.6, width=1, ax=ax)
 
@@ -300,7 +309,7 @@ with st.container():
             style = 'dashed'
             nx.draw_networkx_edges(G, pos, edgelist=edges, edge_color=color, width=path_width, style=style, label="A*", ax=ax)
 
-    # Lejant (Siyah yazı, beyaz zemin, koyu mavi çerçeve)
+    # Lejant
     legend = ax.legend(
         loc='upper left', 
         frameon=True, 
@@ -320,7 +329,7 @@ if a_cost > d_cost:
 
 st.divider()
 
-# --- ANALİZ BÖLÜMÜ (Altair ile Okunabilir Grafikler) ---
+# --- ANALİZ BÖLÜMÜ (GRAFİKLER DÜZELTİLDİ) ---
 st.subheader("📊 Performans Analizi")
 
 col_stats, col_charts = st.columns([1, 1], gap="large")
@@ -337,27 +346,46 @@ with col_charts:
     st.markdown("##### ⏱️ Grafiksel Karşılaştırma")
     tab1, tab2 = st.tabs(["Zaman (ms)", "İşlem Yükü"])
     
-    # Altair için ortak eksen ayarları (Gri Yazı Rengi)
-    axis_config = alt.Axis(labelColor=COLOR_CHART_TEXT, titleColor=COLOR_CHART_TEXT, gridColor=COLOR_EDGE_LIGHT)
+    # GRAFİK RENK AYARLARI (GRI YAPILDI)
+    # Eksen yazılarını koyu zemin üzerinde okunacak "Açık Gri" (#546E7A veya #78909C) yapıyoruz.
+    # Ancak arka plan beyazsa Koyu Gri (#546E7A) daha iyidir. 
+    # Sizin screenshot'ta grafik arka planı koyu göründüğü için Açık Gri/Beyaz seçiyorum.
+    
+    chart_text_color = "#546E7A" # Eğer zemin açıksa koyu gri
+    
+    # Altair Eksen Konfigürasyonu
+    axis_config = alt.Axis(
+        labelColor=chart_text_color, 
+        titleColor=chart_text_color, 
+        gridColor="#CFD8DC"
+    )
 
     with tab1:
-        # Zaman Grafiği (Koyu Mavi)
+        # Zaman Grafiği
         chart_time = alt.Chart(df_res).mark_bar(color=COLOR_SIDEBAR_BG, cornerRadiusEnd=5).encode(
             x=alt.X('Süre (ms)', axis=axis_config),
             y=alt.Y('Algoritma', axis=axis_config, sort='-x'),
             tooltip=['Algoritma', alt.Tooltip('Süre (ms)', format='.2f')]
         ).properties(
-            height=250
-        ).configure_view(strokeOpacity=0) # Dış çerçeveyi kaldır
+            height=250,
+            background='transparent' # Arka planı şeffaf yap
+        ).configure_text(color=chart_text_color).configure_axis(
+            labelColor=chart_text_color,
+            titleColor=chart_text_color
+        )
         st.altair_chart(chart_time, use_container_width=True)
         
     with tab2:
-        # İşlem Yükü Grafiği (Kırmızı)
+        # İşlem Yükü Grafiği
         chart_exp = alt.Chart(df_res).mark_bar(color=COLOR_ACCENT_RED, cornerRadiusEnd=5).encode(
             x=alt.X('Genişletilen', axis=axis_config, title='Genişletilen Düğüm Sayısı'),
             y=alt.Y('Algoritma', axis=axis_config, sort='-x'),
             tooltip=['Algoritma', 'Genişletilen']
         ).properties(
-            height=250
-        ).configure_view(strokeOpacity=0)
+            height=250,
+            background='transparent'
+        ).configure_axis(
+            labelColor=chart_text_color,
+            titleColor=chart_text_color
+        )
         st.altair_chart(chart_exp, use_container_width=True)
