@@ -197,7 +197,7 @@ def create_graph(num_nodes, k_neighbors, min_w, max_w):
 # --- 3. SIDEBAR ---
 with st.sidebar:
     st.image("https://upload.wikimedia.org/wikipedia/tr/6/62/Gazi_%C3%9Cniversitesi_Logosu.png", width=100)
-    st.title("Algoritma Labı")
+    st.title("Algoritmalar")
     st.markdown("---")
     
     st.markdown("### ⚙️ Ayarlar")
