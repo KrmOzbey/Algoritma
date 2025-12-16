@@ -9,72 +9,75 @@ import time
 
 # --- 1. SAYFA VE STİL AYARLARI ---
 st.set_page_config(
-    page_title="Pathfinder Dashboard",
+    page_title="Algoritma Simülasyonu",
     layout="wide",
     initial_sidebar_state="expanded"
 )
 
-# Özel CSS ile Modern Dashboard Görünümü
-st.markdown("""
+# RENK PALETİ TANIMLARI
+COLOR_DARK_BLUE = "#326789"
+COLOR_MED_BLUE = "#78A6C8"
+COLOR_BG_LIGHT = "#E9EEF2"
+COLOR_ACCENT_RED = "#E65C4F"
+
+# Özel CSS ile Renk Paleti Uygulaması
+st.markdown(f"""
     <style>
         /* Genel Arka Plan */
-        .stApp {
-            background-color: #0E1117;
-        }
+        .stApp {{
+            background-color: {COLOR_BG_LIGHT};
+        }}
         
-        /* Sidebar Özelleştirme */
-        [data-testid="stSidebar"] {
-            background-color: #161B22;
-            border-right: 1px solid #30363D;
-        }
+        /* Sidebar Stili */
+        [data-testid="stSidebar"] {{
+            background-color: #ffffff;
+            border-right: 1px solid {COLOR_MED_BLUE};
+        }}
         
         /* Başlıklar */
-        h1, h2, h3 {
-            color: #E6EDF3 !important;
-            font-family: 'Segoe UI', sans-serif;
-        }
+        h1, h2, h3, h4, h5 {{
+            color: {COLOR_DARK_BLUE} !important;
+            font-family: 'Helvetica Neue', sans-serif;
+        }}
         
-        /* Metrik Kutuları */
-        [data-testid="stMetricValue"] {
-            font-size: 24px;
-            color: #58A6FF;
-        }
+        /* Metinler */
+        p, label, span {{
+            color: #2c3e50;
+        }}
         
         /* Tablo Stili */
-        [data-testid="stDataFrame"] {
-            background-color: #161B22;
-            border: 1px solid #30363D;
+        [data-testid="stDataFrame"] {{
+            background-color: #ffffff;
+            border: 1px solid {COLOR_MED_BLUE};
             border-radius: 8px;
-            padding: 10px;
-        }
+            box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+        }}
         
-        /* Buton Stili */
-        div.stButton > button {
-            background-color: #238636;
+        /* Buton Stili (Accent Red) */
+        div.stButton > button {{
+            background-color: {COLOR_ACCENT_RED};
             color: white;
             border: none;
             border-radius: 6px;
-            padding: 0.5rem 1rem;
-            font-weight: bold;
+            padding: 0.6rem 1rem;
+            font-weight: 600;
             width: 100%;
-            transition: all 0.3s ease;
-        }
-        div.stButton > button:hover {
-            background-color: #2EA043;
-            border-color: #2EA043;
-        }
+            transition: all 0.2s ease;
+        }}
+        div.stButton > button:hover {{
+            background-color: #c0392b;
+            box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+        }}
         
-        /* Radyo Butonları ve Sliderlar */
-        .stSlider > div > div > div > div {
-            background-color: #58A6FF;
-        }
-        [data-testid="stMarkdownContainer"] p {
-            font-size: 16px;
-        }
+        /* Expander ve Kutular */
+        .streamlit-expanderHeader {{
+            color: {COLOR_DARK_BLUE};
+            font-weight: bold;
+        }}
     </style>
 """, unsafe_allow_html=True)
 
-# --- 2. ALGORİTMA MANTIKLARI (Aynı Kalıyor) ---
+# --- 2. ALGORİTMA FONKSİYONLARI ---
 def euclidean_dist(node1, node2, positions):
     x1, y1 = positions[node1]
     x2, y2 = positions[node2]
@@ -174,24 +177,28 @@ def create_graph(num_nodes, k_neighbors, min_w, max_w):
             G.add_edge(u, v, weight=random.randint(min_w, max_w))
     return G, pos
 
-# --- 3. YENİ SIDEBAR TASARIMI ---
+# --- 3. SIDEBAR (Kontrol Paneli) ---
 with st.sidebar:
-    st.title("🎛️ Kontrol Paneli")
+    st.image("https://upload.wikimedia.org/wikipedia/tr/6/62/Gazi_%C3%9Cniversitesi_Logosu.png", width=100)
+    st.title("Algoritma Labı")
     
-    st.markdown("### 1. Harita Konfigürasyonu")
-    with st.expander("🌍 Harita Ayarları", expanded=True):
-        node_count = st.slider("Şehir Sayısı", 20, 200, 80)
+    st.markdown("### ⚙️ Ayarlar")
+    
+    # Harita Ayarları
+    with st.expander("🌍 Harita Konfigürasyonu", expanded=True):
+        node_count = st.slider("Şehir Sayısı", 20, 300, 100)
         edge_density = st.slider("Bağlantı Yoğunluğu", 2, 8, 4)
     
-    with st.expander("⚖️ Ağırlık/Maliyet", expanded=False):
+    # Ağırlık Ayarları
+    with st.expander("⚖️ Yol Maliyetleri", expanded=False):
         min_w = st.number_input("Min Ağırlık", 1, 50, 1)
-        max_w = st.number_input("Max Ağırlık", 1, 50, 10)
+        max_w = st.number_input("Max Ağırlık", 1, 50, 20)
     
-    st.markdown("### 2. Görselleştirme")
-    # İSTEĞİNİZ ÜZERİNE BURAYA ALINDI
+    # Görselleştirme Seçimi
+    st.markdown("### 👁️ Görünüm")
     selected_algo_view = st.selectbox(
-        "Haritada Gösterilecek Yol:",
-        ["Karşılaştırmalı (Hepsi)", "Sadece Dijkstra (Mavi)", "Sadece A* (Yeşil)", "Sadece Bellman-Ford (Mor)"]
+        "Gösterilecek Rota:",
+        ["Karşılaştırmalı (Hepsi)", "Sadece Dijkstra (Mavi)", "Sadece A* (Kırmızı)", "Sadece Bellman-Ford (Mor)"]
     )
     
     st.markdown("---")
@@ -199,7 +206,8 @@ with st.sidebar:
         st.session_state['G'], st.session_state['pos'] = create_graph(node_count, edge_density, min_w, max_w)
         st.rerun()
 
-# --- 4. ANA EKRAN DÜZENİ ---
+# --- 4. ANA EKRAN MANTIĞI ---
+
 if 'G' not in st.session_state:
     st.session_state['G'], st.session_state['pos'] = create_graph(node_count, edge_density, min_w, max_w)
 
@@ -209,7 +217,7 @@ nodes = list(G.nodes)
 start_node = nodes[0]
 end_node = nodes[-1]
 
-# Algoritmaları Çalıştır
+# Algoritmaları Hesapla
 results = []
 
 # Dijkstra
@@ -225,7 +233,7 @@ a_time = (time.perf_counter() - t1) * 1000
 results.append({"Algoritma": "A*", "Süre (ms)": a_time, "Maliyet": a_cost, "Genişletilen": a_exp, "Yol": a_path})
 
 # Bellman-Ford
-if node_count <= 150:
+if node_count <= 200: # Performans için limit
     t1 = time.perf_counter()
     b_cost, b_path, b_exp = bellman_ford_algo(G, start_node, end_node)
     b_time = (time.perf_counter() - t1) * 1000
@@ -235,68 +243,88 @@ else:
 
 df_res = pd.DataFrame(results)
 
-# --- LAYOUT (SOL: HARİTA, SAĞ: TABLO) ---
-col_map, col_stats = st.columns([5, 3], gap="medium")
+# --- BÖLÜM 1: HARİTA (Tam Genişlik) ---
+st.subheader("📍 Simülasyon Haritası")
 
-with col_map:
-    st.subheader("📍 Simülasyon Haritası")
-    
-    # Harita Stili - Koyu Tema ile Bütünleşik
-    plt.style.use('dark_background')
-    fig, ax = plt.subplots(figsize=(10, 8))
-    fig.patch.set_facecolor('#0E1117') # Streamlit arka plan rengiyle aynı
-    ax.set_facecolor('#0E1117')
-    
-    # Ağ Çizimi
-    nx.draw_networkx_nodes(G, pos, node_size=30, node_color='#30363D', ax=ax, alpha=0.7)
-    nx.draw_networkx_edges(G, pos, edge_color='#30363D', alpha=0.4, ax=ax)
-    
-    # Başlangıç ve Bitiş
-    nx.draw_networkx_nodes(G, pos, nodelist=[start_node], node_color='#238636', node_size=150, ax=ax, label="Start")
-    nx.draw_networkx_nodes(G, pos, nodelist=[end_node], node_color='#DA3633', node_size=150, ax=ax, label="End")
-    
-    path_width = 2.5
-    
-    # Yolları Çiz
-    if "Dijkstra" in selected_algo_view or "Hepsi" in selected_algo_view:
-        if d_path:
-            edges = list(zip(d_path, d_path[1:]))
-            nx.draw_networkx_edges(G, pos, edgelist=edges, edge_color='#58A6FF', width=path_width+2, alpha=0.6, label="Dijkstra", ax=ax)
-            
-    if "Bellman" in selected_algo_view or "Hepsi" in selected_algo_view:
-        if len(results) > 2 and results[2]["Yol"]:
-            path = results[2]["Yol"]
-            edges = list(zip(path, path[1:]))
-            nx.draw_networkx_edges(G, pos, edgelist=edges, edge_color='#A371F7', width=path_width, style='dotted', label="Bellman-Ford", ax=ax)
+# Grafik Ayarları (Palete Uygun)
+plt.figure(figsize=(14, 6)) # Daha geniş ve büyük harita
+fig, ax = plt.subplots(figsize=(14, 6))
+fig.patch.set_facecolor(COLOR_BG_LIGHT) # Arka plan rengi
+ax.set_facecolor(COLOR_BG_LIGHT)
 
-    if "A*" in selected_algo_view or "Hepsi" in selected_algo_view:
-        if a_path:
-            edges = list(zip(a_path, a_path[1:]))
-            color = '#F1E05A' if a_cost > d_cost else '#3FB950' # Sarı uyarı, yeşil başarılı
-            nx.draw_networkx_edges(G, pos, edgelist=edges, edge_color=color, width=path_width, style='dashed', label="A*", ax=ax)
+# Ağ Çizimi
+# Düğümler: Koyu Mavi, Kenarlar: Orta Mavi
+nx.draw_networkx_nodes(G, pos, node_size=40, node_color=COLOR_DARK_BLUE, ax=ax, alpha=0.8)
+nx.draw_networkx_edges(G, pos, edge_color=COLOR_MED_BLUE, alpha=0.3, ax=ax)
 
-    ax.legend(loc='upper left', facecolor='#161B22', edgecolor='#30363D', labelcolor='#E6EDF3', fontsize=10)
-    ax.axis('off')
-    st.pyplot(fig)
-    
-    # Harita altı uyarı
-    if a_cost > d_cost:
-        st.warning(f"⚠️ A* algoritması {a_cost - d_cost:.1f} birim sapma yaptı! (Heuristic Uyumsuzluğu)")
+# Başlangıç (Yeşil) ve Bitiş (Kiremit Kırmızısı)
+nx.draw_networkx_nodes(G, pos, nodelist=[start_node], node_color='#2ecc71', node_size=200, ax=ax, label="Başlangıç")
+nx.draw_networkx_nodes(G, pos, nodelist=[end_node], node_color=COLOR_ACCENT_RED, node_size=200, ax=ax, label="Hedef")
+
+path_width = 3
+
+# Rotaları Çiz
+if "Dijkstra" in selected_algo_view or "Hepsi" in selected_algo_view:
+    if d_path:
+        edges = list(zip(d_path, d_path[1:]))
+        # Dijkstra: Koyu Mavi Rota
+        nx.draw_networkx_edges(G, pos, edgelist=edges, edge_color=COLOR_DARK_BLUE, width=path_width+2, alpha=0.5, label="Dijkstra", ax=ax)
+        
+if "Bellman" in selected_algo_view or "Hepsi" in selected_algo_view:
+    if len(results) > 2 and results[2]["Yol"]:
+        path = results[2]["Yol"]
+        edges = list(zip(path, path[1:]))
+        # Bellman: Morumsu (Palet dışı kontrast için)
+        nx.draw_networkx_edges(G, pos, edgelist=edges, edge_color='#9b59b6', width=path_width, style='dotted', label="Bellman-Ford", ax=ax)
+
+if "A*" in selected_algo_view or "Hepsi" in selected_algo_view:
+    if a_path:
+        edges = list(zip(a_path, a_path[1:]))
+        # A*: Paletteki Kiremit Rengi (Hata varsa Sarı)
+        color = '#f1c40f' if a_cost > d_cost else COLOR_ACCENT_RED
+        style = 'dashed'
+        nx.draw_networkx_edges(G, pos, edgelist=edges, edge_color=color, width=path_width, style=style, label="A*", ax=ax)
+
+ax.legend(loc='upper left', frameon=True, facecolor='white', edgecolor=COLOR_MED_BLUE)
+ax.axis('off')
+st.pyplot(fig, use_container_width=True)
+
+# Harita altı mesaj
+if a_cost > d_cost:
+    st.warning(f"⚠️ A* Algoritması {a_cost - d_cost:.1f} birim daha maliyetli bir yol buldu! (Heuristic Yanılgısı)")
+
+st.divider()
+
+# --- BÖLÜM 2: PERFORMANS ANALİZİ (Yan Yana) ---
+st.subheader("📊 Performans Analizi")
+
+col_stats, col_charts = st.columns([1, 1], gap="large")
 
 with col_stats:
-    st.subheader("📊 Performans Analizi")
-    
-    # 1. Tablo
-    st.markdown("##### 🏁 Sonuç Özeti")
+    st.markdown("##### 📝 Sonuç Tablosu")
+    # Tabloyu stilize et
     st.dataframe(
-        df_res[["Algoritma", "Süre (ms)", "Maliyet", "Genişletilen"]].style.highlight_min(axis=0, color="#1F6FEB"),
+        df_res[["Algoritma", "Süre (ms)", "Maliyet", "Genişletilen"]].style.format({"Süre (ms)": "{:.2f}"}),
         use_container_width=True,
         hide_index=True
     )
     
-    # 2. Grafikler
-    st.markdown("##### ⏱️ Süre Karşılaştırması (ms)")
-    st.bar_chart(df_res.set_index("Algoritma")["Süre (ms)"], color="#58A6FF")
+    st.info("""
+    **Tablo Yorumu:**
+    * **Süre:** Algoritmanın çalışma hızı. A* genellikle en hızlıdır.
+    * **Maliyet:** Bulunan yolun toplam uzunluğu.
+    * **Genişletilen:** Algoritmanın kaç şehri ziyaret ettiği.
+    """)
+
+with col_charts:
+    st.markdown("##### ⏱️ Grafiksel Karşılaştırma")
     
-    st.markdown("##### 🔍 İşlem Yükü (Node Sayısı)")
-    st.bar_chart(df_res.set_index("Algoritma")["Genişletilen"], color="#A371F7")
+    tab1, tab2 = st.tabs(["Zaman (ms)", "İşlem Yükü"])
+    
+    with tab1:
+        # Renk paletindeki Koyu Maviyi kullan
+        st.bar_chart(df_res.set_index("Algoritma")["Süre (ms)"], color=COLOR_DARK_BLUE)
+        
+    with tab2:
+        # Renk paletindeki Kiremit Rengini kullan
+        st.bar_chart(df_res.set_index("Algoritma")["Genişletilen"], color=COLOR_ACCENT_RED)
