@@ -16,51 +16,66 @@ st.set_page_config(
 )
 
 # --- RENK PALETİ ---
-COLOR_BG_LIGHT = "#E3F2FD"      # Ana Arka Plan
-COLOR_SIDEBAR_BG = "#154360"    # Sidebar Arka Planı
-COLOR_TEXT_MAIN = "#000000"     # Ana Ekran Yazıları
-COLOR_TEXT_SIDEBAR = "#ECEFF1"  # Sidebar Yazıları (Açık Gri/Beyaz - OKUNABİLİRLİK İÇİN)
-COLOR_ACCENT_RED = "#C0392B"    # Kırmızı Vurgular
+COLOR_BG_LIGHT = "#E3F2FD"      # Ana Arka Plan (Açık Mavi)
+COLOR_SIDEBAR_BG = "#154360"    # Sidebar Arka Planı (Koyu Mavi)
+COLOR_TEXT_MAIN = "#000000"     # Ana Ekran Yazıları (Siyah)
+COLOR_TEXT_SIDEBAR = "#B0BEC5"  # Sidebar Yazıları (AÇIK GRİ - Okunabilirlik için)
+COLOR_ACCENT_RED = "#C0392B"    # Buton Rengi
 COLOR_NODE_BRIGHT = "#3498DB"   # Düğüm Rengi
 COLOR_EDGE_LIGHT = "#CFD8DC"    # Kenar Rengi
-COLOR_CHART_TEXT = "#546E7A"    # Ana Ekran Grafik Yazıları (Koyu Gri)
-COLOR_AXIS_TEXT = "#CFD8DC"     # Koyu zemin üstüne yazılacaksa Açık Gri
+COLOR_CHART_TEXT = "#546E7A"    # Grafik Yazı Rengi (Koyu Gri)
 
 # Özel CSS
 st.markdown(f"""
     <style>
-        /* 1. Genel Sayfa Arka Planı */
+        /* 1. Genel Sayfa */
         .stApp {{
             background-color: {COLOR_BG_LIGHT};
         }}
         
-        /* 2. ANA EKRAN YAZILARI (SİYAH) */
-        h1, h2, h3, h4, h5, p, span, li {{
-            color: {COLOR_TEXT_MAIN} !important;
+        /* 2. Ana Ekran Yazı Tipi (Siyah) */
+        h1, h2, h3, h4, h5, p, span, li, div {{
             font-family: 'Segoe UI', sans-serif;
+            color: {COLOR_TEXT_MAIN};
         }}
         
-        /* 3. Sidebar Genel Ayarları */
+        /* 3. SIDEBAR (SOL PANEL) AYARLARI */
         [data-testid="stSidebar"] {{
             background-color: {COLOR_SIDEBAR_BG};
         }}
         
-        /* Sidebar'daki TÜM metinleri Açık Gri yap (Başlıklar, Label'lar) */
-        [data-testid="stSidebar"] h1, [data-testid="stSidebar"] h2, [data-testid="stSidebar"] h3, 
-        [data-testid="stSidebar"] label, [data-testid="stSidebar"] p, [data-testid="stSidebar"] div {{
-            color: {COLOR_TEXT_SIDEBAR} !important;
+        /* Sidebar Başlıkları ve Yazıları (GRİ YAPILDI) */
+        [data-testid="stSidebar"] h1, [data-testid="stSidebar"] h2, [data-testid="stSidebar"] h3 {{
+            color: #FFFFFF !important; /* Ana başlık beyaz kalsın parlasın */
         }}
         
-        /* 4. SIDEBAR SELECTBOX DÜZELTMESİ (KRİTİK) */
-        /* Dropdown kutusunun içindeki seçili metni beyaz/gri yap */
+        /* İSTEĞİNİZ: Kontrol panelindeki yazıları GRİ yap */
+        [data-testid="stSidebar"] p, 
+        [data-testid="stSidebar"] label, 
+        [data-testid="stSidebar"] span,
+        [data-testid="stSidebar"] div.stMarkdown {{
+            color: {COLOR_TEXT_SIDEBAR} !important; /* Açık Gri */
+        }}
+        
+        /* Dropdown (Selectbox) İçi ve Etiketi */
+        [data-testid="stSidebar"] .stSelectbox label {{
+            color: {COLOR_TEXT_SIDEBAR} !important;
+        }}
         [data-testid="stSidebar"] .stSelectbox div[data-baseweb="select"] div {{
-            color: {COLOR_TEXT_SIDEBAR} !important;
-            -webkit-text-fill-color: {COLOR_TEXT_SIDEBAR} !important;
+            color: {COLOR_TEXT_SIDEBAR} !important; /* Seçili metin gri */
+        }}
+        [data-testid="stSidebar"] .stSelectbox svg {{
+            fill: {COLOR_TEXT_SIDEBAR} !important; /* Ok işareti gri */
         }}
         
-        /* Dropdown ok simgesini beyaz yap */
-        [data-testid="stSidebar"] .stSelectbox svg {{
-            fill: {COLOR_TEXT_SIDEBAR} !important;
+        /* 4. HARİTA KUTUSU (Visual Box Effect) */
+        .map-card {{
+            background-color: white;
+            padding: 15px;
+            border-radius: 15px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.1); /* Gölge */
+            border: 2px solid #90A4AE; /* İnce gri çerçeve */
+            margin-bottom: 20px;
         }}
         
         /* 5. Buton Stili */
@@ -68,7 +83,7 @@ st.markdown(f"""
             background-color: {COLOR_ACCENT_RED};
             color: white !important;
             border: none;
-            border-radius: 6px;
+            border-radius: 8px;
             font-weight: bold;
             transition: 0.3s;
         }}
@@ -76,25 +91,11 @@ st.markdown(f"""
             background-color: #A93226;
         }}
         
-        /* 6. Expander Başlıkları */
-        .streamlit-expanderHeader {{
+        /* 6. Tablo Stili */
+        [data-testid="stDataFrame"] {{
             background-color: white;
-            color: black !important; /* Expander içi beyaz olduğu için yazı siyah kalsın */
-            border-radius: 5px;
-        }}
-        
-        /* Sidebar içindeki Expander başlıklarını düzelt */
-        [data-testid="stSidebar"] .streamlit-expanderHeader {{
-            color: {COLOR_SIDEBAR_BG} !important; /* Başlık koyu mavi olsun */
-            background-color: #ECEFF1;
-        }}
-        
-        /* Harita Konteyner */
-        .map-container {{
-            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
-            border-radius: 12px;
-            overflow: hidden;
-            border: 2px solid {COLOR_SIDEBAR_BG}; /* Harita Çerçevesi */
+            border: 1px solid #B0BEC5;
+            border-radius: 8px;
         }}
     </style>
 """, unsafe_allow_html=True)
@@ -199,7 +200,7 @@ def create_graph(num_nodes, k_neighbors, min_w, max_w):
             G.add_edge(u, v, weight=random.randint(min_w, max_w))
     return G, pos
 
-# --- 3. SIDEBAR ---
+# --- 3. SIDEBAR (GRİ YAZILARLA) ---
 with st.sidebar:
     st.image("https://upload.wikimedia.org/wikipedia/tr/6/62/Gazi_%C3%9Cniversitesi_Logosu.png", width=100)
     st.title("Algoritma Labı")
@@ -240,19 +241,16 @@ end_node = nodes[-1]
 # Hesaplamalar
 results = []
 
-# Dijkstra
 t1 = time.perf_counter()
 d_cost, d_path, d_exp = dijkstra_algo(G, start_node, end_node)
 d_time = (time.perf_counter() - t1) * 1000
 results.append({"Algoritma": "Dijkstra", "Süre (ms)": d_time, "Maliyet": d_cost, "Genişletilen": d_exp, "Yol": d_path})
 
-# A*
 t1 = time.perf_counter()
 a_cost, a_path, a_exp = a_star_algo(G, start_node, end_node, pos)
 a_time = (time.perf_counter() - t1) * 1000
 results.append({"Algoritma": "A*", "Süre (ms)": a_time, "Maliyet": a_cost, "Genişletilen": a_exp, "Yol": a_path})
 
-# Bellman-Ford
 if node_count <= 200: 
     t1 = time.perf_counter()
     b_cost, b_path, b_exp = bellman_ford_algo(G, start_node, end_node)
@@ -263,73 +261,73 @@ else:
 
 df_res = pd.DataFrame(results)
 
-# --- HARİTA GÖRSELLEŞTİRME ---
+# --- HARİTA BÖLÜMÜ (KUTU İÇİNDE) ---
 st.subheader("📍 Simülasyon Haritası")
 
-with st.container():
-    st.markdown('<div class="map-container">', unsafe_allow_html=True)
-    
-    plt.figure(figsize=(14, 7))
-    fig, ax = plt.subplots(figsize=(14, 7))
-    fig.patch.set_facecolor(COLOR_BG_LIGHT)
-    ax.set_facecolor(COLOR_BG_LIGHT)
+# CSS ile oluşturduğumuz 'map-card' sınıfını kullanıyoruz
+st.markdown('<div class="map-card">', unsafe_allow_html=True)
 
-    # Eksenleri kapat
-    ax.set_xticks([])
-    ax.set_yticks([])
-    for spine in ax.spines.values():
-        spine.set_visible(False) # Matplotlib çerçevesini kapat (CSS çerçevesi var)
+plt.figure(figsize=(14, 7))
+fig, ax = plt.subplots(figsize=(14, 7))
+# Kutunun içi beyaz olduğu için grafiği de beyaz yapıyoruz
+fig.patch.set_facecolor('white')
+ax.set_facecolor('white')
 
-    # Ağ Çizimi
-    nx.draw_networkx_nodes(G, pos, node_size=60, node_color=COLOR_NODE_BRIGHT, ax=ax, alpha=0.9)
-    nx.draw_networkx_edges(G, pos, edge_color=COLOR_EDGE_LIGHT, alpha=0.6, width=1, ax=ax)
+# Eksenleri tamamen kapat
+ax.set_xticks([])
+ax.set_yticks([])
+for spine in ax.spines.values():
+    spine.set_visible(False)
 
-    # Başlangıç ve Bitiş
-    nx.draw_networkx_nodes(G, pos, nodelist=[start_node], node_color="white", edgecolors=COLOR_SIDEBAR_BG, linewidths=3, node_size=250, ax=ax, label="Başlangıç")
-    nx.draw_networkx_nodes(G, pos, nodelist=[end_node], node_color=COLOR_ACCENT_RED, edgecolors="white", linewidths=2, node_size=250, ax=ax, label="Hedef")
+# Ağ Çizimi
+nx.draw_networkx_nodes(G, pos, node_size=60, node_color=COLOR_NODE_BRIGHT, ax=ax, alpha=0.9)
+nx.draw_networkx_edges(G, pos, edge_color=COLOR_EDGE_LIGHT, alpha=0.6, width=1, ax=ax)
 
-    path_width = 4
+# Başlangıç ve Bitiş
+nx.draw_networkx_nodes(G, pos, nodelist=[start_node], node_color="white", edgecolors=COLOR_SIDEBAR_BG, linewidths=3, node_size=250, ax=ax, label="Başlangıç")
+nx.draw_networkx_nodes(G, pos, nodelist=[end_node], node_color=COLOR_ACCENT_RED, edgecolors="white", linewidths=2, node_size=250, ax=ax, label="Hedef")
 
-    # Rotalar
-    if "Dijkstra" in selected_algo_view or "Hepsi" in selected_algo_view:
-        if d_path:
-            edges = list(zip(d_path, d_path[1:]))
-            nx.draw_networkx_edges(G, pos, edgelist=edges, edge_color=COLOR_SIDEBAR_BG, width=path_width+1, alpha=0.7, label="Dijkstra", ax=ax)
-            
-    if "Bellman" in selected_algo_view or "Hepsi" in selected_algo_view:
-        if len(results) > 2 and results[2]["Yol"]:
-            path = results[2]["Yol"]
-            edges = list(zip(path, path[1:]))
-            nx.draw_networkx_edges(G, pos, edgelist=edges, edge_color='#9B59B6', width=path_width-1, style='dotted', label="Bellman-Ford", ax=ax)
+path_width = 4
 
-    if "A*" in selected_algo_view or "Hepsi" in selected_algo_view:
-        if a_path:
-            edges = list(zip(a_path, a_path[1:]))
-            color = '#F39C12' if a_cost > d_cost else COLOR_ACCENT_RED
-            style = 'dashed'
-            nx.draw_networkx_edges(G, pos, edgelist=edges, edge_color=color, width=path_width, style=style, label="A*", ax=ax)
+if "Dijkstra" in selected_algo_view or "Hepsi" in selected_algo_view:
+    if d_path:
+        edges = list(zip(d_path, d_path[1:]))
+        nx.draw_networkx_edges(G, pos, edgelist=edges, edge_color=COLOR_SIDEBAR_BG, width=path_width+1, alpha=0.7, label="Dijkstra", ax=ax)
+        
+if "Bellman" in selected_algo_view or "Hepsi" in selected_algo_view:
+    if len(results) > 2 and results[2]["Yol"]:
+        path = results[2]["Yol"]
+        edges = list(zip(path, path[1:]))
+        nx.draw_networkx_edges(G, pos, edgelist=edges, edge_color='#9B59B6', width=path_width-1, style='dotted', label="Bellman-Ford", ax=ax)
 
-    # Lejant
-    legend = ax.legend(
-        loc='upper left', 
-        frameon=True, 
-        facecolor='white', 
-        edgecolor=COLOR_SIDEBAR_BG,
-        framealpha=1,
-        labelcolor='black',
-        fontsize=11,
-        borderpad=1
-    )
-    
-    st.pyplot(fig, use_container_width=True)
-    st.markdown('</div>', unsafe_allow_html=True)
+if "A*" in selected_algo_view or "Hepsi" in selected_algo_view:
+    if a_path:
+        edges = list(zip(a_path, a_path[1:]))
+        color = '#F39C12' if a_cost > d_cost else COLOR_ACCENT_RED
+        style = 'dashed'
+        nx.draw_networkx_edges(G, pos, edgelist=edges, edge_color=color, width=path_width, style=style, label="A*", ax=ax)
+
+# Lejant
+legend = ax.legend(
+    loc='upper left', 
+    frameon=True, 
+    facecolor='white', 
+    edgecolor=COLOR_EDGE_LIGHT,
+    framealpha=1,
+    labelcolor='black',
+    fontsize=11,
+    borderpad=1
+)
+
+st.pyplot(fig, use_container_width=True)
+st.markdown('</div>', unsafe_allow_html=True) # Kutuyu kapat
 
 if a_cost > d_cost:
     st.error(f"⚠️ A* Algoritması {a_cost - d_cost:.1f} birim daha maliyetli bir yol buldu! (Heuristic Yanılgısı)")
 
 st.divider()
 
-# --- ANALİZ BÖLÜMÜ (GRAFİKLER DÜZELTİLDİ) ---
+# --- ANALİZ BÖLÜMÜ ---
 st.subheader("📊 Performans Analizi")
 
 col_stats, col_charts = st.columns([1, 1], gap="large")
@@ -346,37 +344,28 @@ with col_charts:
     st.markdown("##### ⏱️ Grafiksel Karşılaştırma")
     tab1, tab2 = st.tabs(["Zaman (ms)", "İşlem Yükü"])
     
-    # GRAFİK RENK AYARLARI (GRI YAPILDI)
-    # Eksen yazılarını koyu zemin üzerinde okunacak "Açık Gri" (#546E7A veya #78909C) yapıyoruz.
-    # Ancak arka plan beyazsa Koyu Gri (#546E7A) daha iyidir. 
-    # Sizin screenshot'ta grafik arka planı koyu göründüğü için Açık Gri/Beyaz seçiyorum.
-    
-    chart_text_color = "#546E7A" # Eğer zemin açıksa koyu gri
-    
-    # Altair Eksen Konfigürasyonu
+    # Koyu Gri Yazılar
     axis_config = alt.Axis(
-        labelColor=chart_text_color, 
-        titleColor=chart_text_color, 
-        gridColor="#CFD8DC"
+        labelColor=COLOR_CHART_TEXT, 
+        titleColor=COLOR_CHART_TEXT, 
+        gridColor="#ECEFF1"
     )
 
     with tab1:
-        # Zaman Grafiği
         chart_time = alt.Chart(df_res).mark_bar(color=COLOR_SIDEBAR_BG, cornerRadiusEnd=5).encode(
             x=alt.X('Süre (ms)', axis=axis_config),
             y=alt.Y('Algoritma', axis=axis_config, sort='-x'),
             tooltip=['Algoritma', alt.Tooltip('Süre (ms)', format='.2f')]
         ).properties(
             height=250,
-            background='transparent' # Arka planı şeffaf yap
-        ).configure_text(color=chart_text_color).configure_axis(
-            labelColor=chart_text_color,
-            titleColor=chart_text_color
+            background='transparent'
+        ).configure_axis(
+            labelColor=COLOR_CHART_TEXT,
+            titleColor=COLOR_CHART_TEXT
         )
         st.altair_chart(chart_time, use_container_width=True)
         
     with tab2:
-        # İşlem Yükü Grafiği
         chart_exp = alt.Chart(df_res).mark_bar(color=COLOR_ACCENT_RED, cornerRadiusEnd=5).encode(
             x=alt.X('Genişletilen', axis=axis_config, title='Genişletilen Düğüm Sayısı'),
             y=alt.Y('Algoritma', axis=axis_config, sort='-x'),
@@ -385,7 +374,7 @@ with col_charts:
             height=250,
             background='transparent'
         ).configure_axis(
-            labelColor=chart_text_color,
-            titleColor=chart_text_color
+            labelColor=COLOR_CHART_TEXT,
+            titleColor=COLOR_CHART_TEXT
         )
         st.altair_chart(chart_exp, use_container_width=True)
