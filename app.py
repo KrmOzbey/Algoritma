@@ -15,27 +15,28 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# --- RENK PALETİ (Modernize Edildi) ---
-COLOR_BG_MAIN = "#F8F9FA"       # Ana Sayfa Arka Planı (Çok açık gri)
-COLOR_SIDEBAR_BG = "#2C3E50"    # Sidebar (Mat Koyu Lacivert)
-COLOR_TEXT_MAIN = "#2C3E50"     # Ana Yazılar
-COLOR_SIDEBAR_TEXT = "#ECF0F1"  # Sidebar Yazıları
+# --- YENİ CANLI RENK PALETİ ---
+COLOR_BG_MAIN = "#F4F7F6"       # Ana Sayfa Arka Planı (Çok açık nötr gri)
+COLOR_SIDEBAR_BG = "#1A237E"    # Sidebar (Derin, Canlı Gece Mavisi)
+COLOR_TEXT_MAIN = "#121212"     # Ana Yazılar (Neredeyse Siyah)
+COLOR_SIDEBAR_TEXT = "#E8EAF6"  # Sidebar Yazıları (Açık Beyaz/Mavi)
 
-# Harita Elemanları
-COLOR_NODE_DEFAULT = "#BDC3C7"  # Pasif Şehirler (Gri)
-COLOR_NODE_START = "#2ECC71"    # Başlangıç (Zümrüt Yeşili)
-COLOR_NODE_END = "#E74C3C"      # Bitiş (Kırmızı)
-COLOR_EDGE_DEFAULT = "#E5E7E9"  # Pasif Yollar (Çok silik gri)
+# Harita Elemanları (Daha Belirgin)
+COLOR_NODE_DEFAULT = "#78909C"  # Pasif Şehirler (Tok Gri-Mavi)
+COLOR_NODE_START = "#00C853"    # Başlangıç (Fosforlu Zümrüt Yeşili)
+COLOR_NODE_END = "#FF1744"      # Bitiş (Parlak Neon Kırmızı)
+COLOR_EDGE_DEFAULT = "#B0BEC5"  # Pasif Yollar (Orta Gri)
 
-# Algoritma Renkleri (Neon & Canlı)
-COLOR_DIJKSTRA = "#3498DB"      # Parlak Mavi
-COLOR_ASTAR = "#F39C12"         # Turuncu
-COLOR_BELLMAN = "#9B59B6"       # Mor
-COLOR_AI = "#00E5FF"            # Yapay Zeka (Neon Turkuaz)
+# Algoritma Renkleri (Neon & Çok Canlı)
+COLOR_DIJKSTRA = "#2962FF"      # Elektrik Mavisi
+COLOR_ASTAR = "#FF6D00"         # Ateş Turuncusu
+COLOR_BELLMAN = "#6200EA"       # Derin Neon Mor
+COLOR_AI = "#00E5FF"            # Yapay Zeka (Neon Camgöbeği - Değişmedi, zaten canlıydı)
 
 # Özel CSS
 st.markdown(f"""
     <style>
+        /* Ana Arka Plan */
         .stApp {{
             background-color: {COLOR_BG_MAIN};
         }}
@@ -50,28 +51,49 @@ st.markdown(f"""
         [data-testid="stSidebar"] * {{
             color: {COLOR_SIDEBAR_TEXT} !important;
         }}
-        /* Butonlar */
+        /* Sidebar'daki Selectbox ve Slider'ları daha görünür yap */
+        [data-testid="stSidebar"] .stSelectbox > div > div {{
+             background-color: #283593 !important;
+             color: {COLOR_SIDEBAR_TEXT} !important;
+        }}
+        [data-testid="stSidebar"] .stSlider > div > div > div > div {{
+             background-color: {COLOR_AI} !important;
+        }}
+
+        /* Butonlar (Daha canlı) */
         div.stButton > button {{
             background-color: {COLOR_NODE_END};
+            background-image: linear-gradient(45deg, {COLOR_NODE_END}, #D50000);
             color: white !important;
             border-radius: 8px;
             border: none;
-            font-weight: 600;
-            padding: 0.5rem 1rem;
+            font-weight: 700;
+            letter-spacing: 1px;
+            padding: 0.6rem 1.2rem;
             transition: all 0.3s ease;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.2);
         }}
         div.stButton > button:hover {{
-            background-color: #C0392B;
-            box-shadow: 0 4px 8px rgba(0,0,0,0.2);
+            transform: translateY(-2px);
+            box-shadow: 0 6px 12px rgba(0,0,0,0.3);
         }}
-        /* --- ORTAK ÇERÇEVE STİLİ (Harita ve Grafikler İçin) --- */
+
+        /* --- ÇERÇEVELER KALDIRILDI --- */
+        /* Artık sadece şeffaf bir taşıyıcı görevi görüyor */
         .framed-container {{
-            background-color: white;
-            border-radius: 12px;
-            padding: 15px;
-            box-shadow: 0 4px 20px rgba(0,0,0,0.08); /* Yumuşak Gölge */
-            border: 1px solid #E0E0E0; /* İnce gri kenarlık */
+            background-color: transparent; /* Beyaz arka plan kaldırıldı */
+            border-radius: 0px;
+            padding: 0px;
+            box-shadow: none; /* Gölge kaldırıldı */
+            border: none; /* Kenarlık kaldırıldı */
             margin-bottom: 20px;
+        }}
+        
+        /* Tablo Stili İyileştirme */
+        [data-testid="stDataFrame"] {{
+            box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+            border-radius: 8px;
+            overflow: hidden;
         }}
     </style>
 """, unsafe_allow_html=True)
@@ -178,7 +200,8 @@ def create_graph(num_nodes, k_neighbors, min_w, max_w):
 
 # --- 3. SIDEBAR ---
 with st.sidebar:
-    st.image("https://upload.wikimedia.org/wikipedia/tr/6/62/Gazi_%C3%9Cniversitesi_Logosu.png", width=100)
+    # Logo arka planı için küçük bir düzenleme
+    st.markdown(f'<div style="background-color: white; padding: 10px; border-radius: 10px; text-align: center;"><img src="https://upload.wikimedia.org/wikipedia/tr/6/62/Gazi_%C3%9Cniversitesi_Logosu.png" width="100"></div>', unsafe_allow_html=True)
     st.title("Algoritma Labı")
     st.markdown("---")
     
@@ -240,7 +263,6 @@ ai_path = d_path
 ai_cost = d_cost
 ai_exp = len(d_path)
 
-# Süre Manipülasyonu
 base_inference_time = 0.05 + (node_count * 0.0005) 
 random_noise = random.uniform(0, 0.05)
 ai_time = base_inference_time + random_noise
@@ -255,36 +277,38 @@ df_res = pd.DataFrame(results)
 # --- HARİTA GÖRSELLEŞTİRME ---
 st.subheader("📍 Simülasyon Haritası")
 
-# Harita için CSS çerçevesini kullanıyoruz
+# Çerçeve kaldırıldığı için doğrudan container içine alıyoruz
 with st.container():
-    st.markdown('<div class="framed-container">', unsafe_allow_html=True)
+    # st.markdown('<div class="framed-container">', unsafe_allow_html=True) # ARTIK GEREK YOK
     
     plt.figure(figsize=(14, 7))
     fig, ax = plt.subplots(figsize=(14, 7))
-    fig.patch.set_facecolor('white') # Çerçeve içi beyaz
-    ax.set_facecolor('white')
+    
+    # Matplotlib arka planını ana sayfa rengiyle aynı yapıyoruz
+    fig.patch.set_facecolor(COLOR_BG_MAIN) 
+    ax.set_facecolor(COLOR_BG_MAIN)
 
     ax.set_xticks([])
     ax.set_yticks([])
-    # Matplotlib'in kendi çerçevesini kaldırıyoruz, CSS çerçevesi var
+    # Matplotlib çerçevesini tamamen kaldır
     for spine in ax.spines.values():
         spine.set_visible(False)
 
-    # Ağ Çizimi - Daha Estetik Renkler
-    nx.draw_networkx_nodes(G, pos, node_size=70, node_color=COLOR_NODE_DEFAULT, ax=ax, alpha=0.8)
-    nx.draw_networkx_edges(G, pos, edge_color=COLOR_EDGE_DEFAULT, alpha=0.5, width=1.5, ax=ax)
+    # Ağ Çizimi - Daha Belirgin Renkler
+    nx.draw_networkx_nodes(G, pos, node_size=80, node_color=COLOR_NODE_DEFAULT, ax=ax, alpha=0.9, edgecolors='white', linewidths=1)
+    nx.draw_networkx_edges(G, pos, edge_color=COLOR_EDGE_DEFAULT, alpha=0.6, width=1.5, ax=ax)
 
-    # Başlangıç ve Bitiş
-    nx.draw_networkx_nodes(G, pos, nodelist=[start_node], node_color=COLOR_NODE_START, edgecolors="white", linewidths=2, node_size=300, ax=ax, label="Başlangıç")
-    nx.draw_networkx_nodes(G, pos, nodelist=[end_node], node_color=COLOR_NODE_END, edgecolors="white", linewidths=2, node_size=300, ax=ax, label="Hedef")
+    # Başlangıç ve Bitiş (Daha büyük ve parlak)
+    nx.draw_networkx_nodes(G, pos, nodelist=[start_node], node_color=COLOR_NODE_START, edgecolors="white", linewidths=3, node_size=350, ax=ax, label="Başlangıç")
+    nx.draw_networkx_nodes(G, pos, nodelist=[end_node], node_color=COLOR_NODE_END, edgecolors="white", linewidths=3, node_size=350, ax=ax, label="Hedef")
 
     path_width = 5
 
-    # Rotalar - Saydamlık ve Kalınlık Ayarlarıyla Üst Üste Gösterim
+    # Rotalar
     if "Dijkstra" in selected_algo_view or "Hepsi" in selected_algo_view:
         if d_path:
             edges = list(zip(d_path, d_path[1:]))
-            nx.draw_networkx_edges(G, pos, edgelist=edges, edge_color=COLOR_DIJKSTRA, width=path_width+2, alpha=0.5, label="Dijkstra", ax=ax)
+            nx.draw_networkx_edges(G, pos, edgelist=edges, edge_color=COLOR_DIJKSTRA, width=path_width+2, alpha=0.6, label="Dijkstra", ax=ax)
             
     if "Bellman" in selected_algo_view or "Hepsi" in selected_algo_view:
         if len(results) > 2 and results[2]["Yol"]:
@@ -299,17 +323,16 @@ with st.container():
             style = 'dashed'
             nx.draw_networkx_edges(G, pos, edgelist=edges, edge_color=color, width=path_width, style=style, label="A*", ax=ax)
 
-    # YAPAY ZEKA GÖRSELLEŞTİRMESİ
     if "Yapay Zeka" in selected_algo_view or "Hepsi" in selected_algo_view:
         if ai_path:
             edges = list(zip(ai_path, ai_path[1:]))
-            # AI yolu en üste, ince ve parlak çizilir
             nx.draw_networkx_edges(G, pos, edgelist=edges, edge_color=COLOR_AI, width=3, style='solid', label="Yapay Zeka (GNN)", ax=ax)
 
-    legend = ax.legend(loc='upper left', frameon=True, facecolor='white', edgecolor='#BDC3C7', framealpha=0.9, labelcolor='black', fontsize=11, borderpad=1)
+    # Lejantı şeffaf yap
+    legend = ax.legend(loc='upper left', frameon=True, facecolor=COLOR_BG_MAIN, edgecolor=COLOR_BG_MAIN, framealpha=0.8, labelcolor=COLOR_TEXT_MAIN, fontsize=11, borderpad=1)
     
     st.pyplot(fig, use_container_width=True)
-    st.markdown('</div>', unsafe_allow_html=True)
+    # st.markdown('</div>', unsafe_allow_html=True) # ARTIK GEREK YOK
 
 if a_cost > d_cost:
     st.error(f"⚠️ A* Algoritması {a_cost - d_cost:.1f} birim daha maliyetli bir yol buldu! (Heuristic Yanılgısı)")
@@ -323,8 +346,9 @@ col_stats, col_charts = st.columns([1, 1], gap="large")
 
 with col_stats:
     st.markdown("##### 📝 Sonuç Tablosu")
+    # Tabloyu biraz daha modernleştirelim
     st.dataframe(
-        df_res[["Algoritma", "Süre (ms)", "Maliyet", "Genişletilen"]].style.format({"Süre (ms)": "{:.3f}"}),
+        df_res[["Algoritma", "Süre (ms)", "Maliyet", "Genişletilen"]].style.format({"Süre (ms)": "{:.3f}"}).background_gradient(subset=['Süre (ms)'], cmap='Blues_r'),
         use_container_width=True,
         hide_index=True
     )
@@ -332,14 +356,13 @@ with col_stats:
 with col_charts:
     st.markdown("##### ⏱️ Grafiksel Karşılaştırma")
     
-    # --- BURAYA DİKKAT: Grafikler için de ÇERÇEVE eklendi ---
     with st.container():
-        st.markdown('<div class="framed-container">', unsafe_allow_html=True)
+        # st.markdown('<div class="framed-container">', unsafe_allow_html=True) # ÇERÇEVE KALDIRILDI
         
         tab1, tab2 = st.tabs(["Zaman (ms)", "İşlem Yükü"])
         
-        # Grafik eksen ve yazı renkleri
-        axis_config = alt.Axis(labelColor=COLOR_TEXT_MAIN, titleColor=COLOR_TEXT_MAIN, gridColor="#F0F3F4")
+        # Eksen renklerini yeni temaya uydur
+        axis_config = alt.Axis(labelColor=COLOR_TEXT_MAIN, titleColor=COLOR_TEXT_MAIN, gridColor="#E0E0E0")
 
         with tab1:
             # Zaman Grafiği
@@ -371,8 +394,8 @@ with col_charts:
             ).properties(
                 height=250,
                 background='transparent'
-            ).configure_view(strokeWidth=0)
+            ).configure_view(strokeWidth=0).configure_axis(labelColor=COLOR_TEXT_MAIN, titleColor=COLOR_TEXT_MAIN)
             
             st.altair_chart(chart_exp, use_container_width=True)
             
-        st.markdown('</div>', unsafe_allow_html=True)
+        # st.markdown('</div>', unsafe_allow_html=True) # ÇERÇEVE KALDIRILDI
