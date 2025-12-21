@@ -1,153 +1,24 @@
 import streamlit as st
-import networkx as nx
-import matplotlib.pyplot as plt
-import pandas as pd
-import random
-import math
-import heapq
-import time
-import altair as alt
 import torch
 import torch.nn as nn
+import networkx as nx
 import numpy as np
-from torch_geometric.data import Data
+import matplotlib.pyplot as plt
 from torch_geometric.nn import GCNConv
+from torch_geometric.data import Data
 
-# --- 1. SAYFA VE STİL AYARLARI ---
-st.set_page_config(
-    page_title="AI vs Algoritmalar (Türkiye)",
-    layout="wide",
-    initial_sidebar_state="expanded"
-)
+# -----------------------------------------------------------------------------
+# 1. MODEL SINIFLARI (Eğitim kodunuzla birebir aynı olmalı)
+# -----------------------------------------------------------------------------
 
-# --- RENK PALETİ ---
-COLOR_BG_LIGHT = "#E3F2FD"      
-COLOR_SIDEBAR_BG = "#154360"    
-COLOR_TEXT_MAIN = "#000000"     
-COLOR_SIDEBAR_TEXT_GRAY = "#B0BEC5"  
-COLOR_ACCENT_RED = "#C0392B"    
-COLOR_NODE_BRIGHT = "#3498DB"   
-COLOR_EDGE_LIGHT = "#90A4AE"    
-COLOR_CHART_TEXT = "#546E7A"    
-COLOR_AI_CYAN = "#00E5FF" 
-
-# Özel CSS
-st.markdown(f"""
-    <style>
-        .stApp {{ background-color: {COLOR_BG_LIGHT}; }}
-        h1, h2, h3, h4, h5, p, span, li {{ color: {COLOR_TEXT_MAIN} !important; font-family: 'Segoe UI', sans-serif; }}
-        [data-testid="stSidebar"] {{ background-color: {COLOR_SIDEBAR_BG}; }}
-        [data-testid="stSidebar"] * {{ color: {COLOR_SIDEBAR_TEXT_GRAY} !important; }}
-        div.stButton > button {{
-            background-color: {COLOR_ACCENT_RED}; color: white !important; border: none;
-            border-radius: 6px; font-weight: bold; transition: 0.3s;
-        }}
-        .map-container {{
-            box-shadow: 0 6px 14px rgba(0,0,0,0.2); border-radius: 4px; overflow: hidden;
-            padding: 5px; background-color: white; border: 2px solid {COLOR_SIDEBAR_BG};
-        }}
-    </style>
-""", unsafe_allow_html=True)
-
-# --- 2. TÜRKİYE HARİTASI VERİSİ (SABİT TOPOLOJİ) ---
-RAW_GRAPH_DATA = {
-    "Adana": [("Mersin", 6), ("Osmaniye", 14), ("Hatay", 8), ("Kahramanmaraş", 19), ("Niğde", 4)],
-    "Adıyaman": [("Malatya", 15), ("Kahramanmaraş", 13), ("Gaziantep", 5), ("Şanlıurfa", 7)],
-    "Afyonkarahisar": [("Uşak", 2), ("Kütahya", 17), ("Eskişehir", 9), ("Konya", 11), ("Isparta", 6), ("Denizli", 20)],
-    "Ağrı": [("Iğdır", 3), ("Kars", 15), ("Erzurum", 8), ("Muş", 11), ("Bitlis", 6), ("Van", 17)],
-    "Aksaray": [("Konya", 10), ("Nevşehir", 13), ("Niğde", 14), ("Ankara", 5), ("Kırşehir", 12)],
-    "Amasya": [("Samsun", 7), ("Tokat", 2), ("Çorum", 15)],
-    "Ankara": [("Kırıkkale", 4), ("Çankırı", 9), ("Eskişehir", 16), ("Konya", 8), ("Aksaray", 18)],
-    "Antalya": [("Isparta", 6), ("Burdur", 15), ("Muğla", 12), ("Konya", 10), ("Mersin", 9)],
-    "Ardahan": [("Kars", 17), ("Artvin", 6)],
-    "Artvin": [("Rize", 8), ("Ardahan", 12)],
-    "Aydın": [("İzmir", 13), ("Manisa", 13), ("Denizli", 7), ("Muğla", 20)],
-    "Balıkesir": [("Çanakkale", 11), ("Bursa", 16), ("Kütahya", 10), ("Manisa", 18), ("İzmir", 5)],
-    "Bartın": [("Kastamonu", 6), ("Zonguldak", 14)],
-    "Batman": [("Diyarbakır", 18), ("Siirt", 4), ("Mardin", 15), ("Şırnak", 12)],
-    "Bayburt": [("Trabzon", 5), ("Erzurum", 7), ("Gümüşhane", 17)],
-    "Bilecik": [("Bursa", 14), ("Eskişehir", 13), ("Kütahya", 16), ("Sakarya", 7)],
-    "Bingöl": [("Erzurum", 10), ("Erzincan", 9), ("Elazığ", 6), ("Diyarbakır", 13), ("Muş", 17)],
-    "Bitlis": [("Van", 18), ("Muş", 7), ("Siirt", 13), ("Ağrı", 15)],
-    "Bolu": [("Düzce", 12), ("Zonguldak", 13), ("Karabük", 7), ("Çankırı", 11), ("Ankara", 8), ("Sakarya", 12)],
-    "Burdur": [("Isparta", 6), ("Antalya", 15), ("Denizli", 3)],
-    "Bursa": [("Balıkesir", 13), ("Kütahya", 13), ("Bilecik", 5), ("Yalova", 17)],
-    "Çanakkale": [("Balıkesir", 18), ("Tekirdağ", 19), ("Edirne", 15)],
-    "Çankırı": [("Kastamonu", 9), ("Karabük", 17), ("Bolu", 6), ("Ankara", 8), ("Kırıkkale", 15)],
-    "Çorum": [("Amasya", 12), ("Samsun", 20), ("Sinop", 5), ("Kastamonu", 18), ("Yozgat", 9), ("Kırıkkale", 13)],
-    "Denizli": [("Uşak", 14), ("Afyonkarahisar", 20), ("Burdur", 3), ("Muğla", 19), ("Aydın", 7)],
-    "Diyarbakır": [("Elazığ", 13), ("Bingöl", 19), ("Muş", 17), ("Batman", 4), ("Mardin", 11), ("Şanlıurfa", 18)],
-    "Düzce": [("Zonguldak", 20), ("Bolu", 6), ("Sakarya", 13)],
-    "Edirne": [("Kırklareli", 9), ("Tekirdağ", 13), ("Çanakkale", 7)],
-    "Elazığ": [("Malatya", 13), ("Bingöl", 12), ("Tunceli", 17), ("Diyarbakır", 11)],
-    "Erzincan": [("Erzurum", 17), ("Bingöl", 15), ("Tunceli", 9), ("Sivas", 6)],
-    "Erzurum": [("Bayburt", 6), ("Erzincan", 13), ("Bingöl", 19), ("Ağrı", 18), ("Kars", 5)],
-    "Eskişehir": [("Kütahya", 18), ("Afyonkarahisar", 20), ("Ankara", 5), ("Bilecik", 14)],
-    "Gaziantep": [("Kilis", 5), ("Şanlıurfa", 16), ("Adıyaman", 14), ("Osmaniye", 7)],
-    "Giresun": [("Trabzon", 9), ("Gümüşhane", 19), ("Ordu", 7), ("Sivas", 16)],
-    "Gümüşhane": [("Trabzon", 14), ("Bayburt", 12), ("Erzincan", 17), ("Giresun", 8)],
-    "Hakkari": [("Şırnak", 16), ("Van", 7), ("Siirt", 10)],
-    "Hatay": [("Osmaniye", 18), ("Adana", 14)],
-    "Iğdır": [("Kars", 8), ("Ağrı", 17)],
-    "Isparta": [("Afyonkarahisar", 19), ("Burdur", 7), ("Antalya", 12), ("Konya", 17)],
-    "İstanbul": [("Kocaeli", 5), ("Tekirdağ", 13)],
-    "İzmir": [("Manisa", 13), ("Aydın", 18)],
-    "Kahramanmaraş": [("Osmaniye", 10), ("Gaziantep", 11), ("Adıyaman", 15), ("Malatya", 8), ("Adana", 12)],
-    "Karabük": [("Bartın", 12), ("Kastamonu", 4), ("Çankırı", 19), ("Bolu", 6)],
-    "Karaman": [("Konya", 16), ("Mersin", 13)],
-    "Kars": [("Ardahan", 7), ("Iğdır", 14), ("Ağrı", 11), ("Erzurum", 16)],
-    "Kastamonu": [("Sinop", 9), ("Çorum", 12), ("Karabük", 8), ("Bartın", 20), ("Çankırı", 7)],
-    "Kayseri": [("Nevşehir", 19), ("Yozgat", 8), ("Sivas", 10), ("Niğde", 4)],
-    "Kırıkkale": [("Kırşehir", 15), ("Ankara", 18), ("Çankırı", 8), ("Yozgat", 19), ("Çorum", 13)],
-    "Kırklareli": [("Tekirdağ", 17), ("Edirne", 13)],
-    "Kırşehir": [("Nevşehir", 10), ("Aksaray", 19), ("Kırıkkale", 9), ("Yozgat", 7)],
-    "Kilis": [("Gaziantep", 6), ("Şanlıurfa", 20)],
-    "Kocaeli": [("Sakarya", 8), ("Bursa", 18), ("Yalova", 16), ("İstanbul", 11)],
-    "Konya": [("Aksaray", 6), ("Niğde", 15), ("Karaman", 12), ("Antalya", 10), ("Isparta", 16), ("Afyonkarahisar", 9), ("Eskişehir", 7), ("Ankara", 14)],
-    "Kütahya": [("Uşak", 16), ("Afyonkarahisar", 8), ("Eskişehir", 7), ("Bilecik", 19), ("Balıkesir", 2)],
-    "Malatya": [("Elazığ", 18), ("Kahramanmaraş", 14), ("Adıyaman", 4), ("Sivas", 6)],
-    "Manisa": [("İzmir", 12), ("Aydın", 6), ("Balıkesir", 14)],
-    "Mardin": [("Şırnak", 18), ("Batman", 17), ("Diyarbakır", 8), ("Şanlıurfa", 14)],
-    "Mersin": [("Karaman", 19), ("Antalya", 7), ("Adana", 17)],
-    "Muğla": [("Aydın", 20), ("Denizli", 3), ("Antalya", 9)],
-    "Muş": [("Bingöl", 6), ("Bitlis", 9), ("Van", 5), ("Ağrı", 18), ("Diyarbakır", 13)],
-    "Nevşehir": [("Aksaray", 14), ("Kırşehir", 8), ("Niğde", 19), ("Kayseri", 5)],
-    "Niğde": [("Aksaray", 17), ("Nevşehir", 11), ("Kayseri", 14), ("Adana", 8), ("Konya", 19)],
-    "Ordu": [("Samsun", 12), ("Giresun", 15), ("Sivas", 8)],
-    "Osmaniye": [("Hatay", 18), ("Adana", 11), ("Kahramanmaraş", 13), ("Gaziantep", 15)],
-    "Rize": [("Artvin", 9), ("Trabzon", 16)],
-    "Sakarya": [("Kocaeli", 12), ("Bilecik", 13), ("Bolu", 11), ("Düzce", 6)],
-    "Samsun": [("Sinop", 7), ("Amasya", 18), ("Tokat", 4), ("Ordu", 5), ("Çorum", 10)],
-    "Siirt": [("Bitlis", 13), ("Batman", 4), ("Şırnak", 8), ("Hakkari", 13)],
-    "Sinop": [("Kastamonu", 14), ("Samsun", 5), ("Çorum", 10)],
-    "Sivas": [("Yozgat", 13), ("Kayseri", 7), ("Malatya", 19), ("Erzincan", 16), ("Giresun", 8), ("Ordu", 5)],
-    "Şanlıurfa": [("Gaziantep", 13), ("Adıyaman", 11), ("Mardin", 16), ("Diyarbakır", 4), ("Kilis", 18)],
-    "Şırnak": [("Mardin", 17), ("Siirt", 5), ("Hakkari", 6), ("Batman", 18)],
-    "Tekirdağ": [("İstanbul", 10), ("Kırklareli", 19), ("Edirne", 12), ("Çanakkale", 13)],
-    "Tokat": [("Amasya", 18), ("Sivas", 9), ("Samsun", 5)],
-    "Trabzon": [("Rize", 20), ("Gümüşhane", 7), ("Bayburt", 8), ("Giresun", 16)],
-    "Tunceli": [("Elazığ", 8), ("Erzincan", 12)],
-    "Uşak": [("Kütahya", 10), ("Afyonkarahisar", 17), ("Denizli", 6)],
-    "Van": [("Bitlis", 17), ("Ağrı", 3), ("Hakkari", 11)],
-    "Yalova": [("Kocaeli", 13), ("Bursa", 12)],
-    "Yozgat": [("Çorum", 14), ("Kırıkkale", 11), ("Kırşehir", 7), ("Kayseri", 10), ("Sivas", 16)],
-    "Zonguldak": [("Bartın", 17), ("Karabük", 18), ("Bolu", 7), ("Düzce", 9)]
-}
-
-# Şehirleri alfabetik sıraya dizip indexleme
-SORTED_NODES = sorted(list(RAW_GRAPH_DATA.keys()))
-NODE_TO_IDX = {node: i for i, node in enumerate(SORTED_NODES)}
-NUM_NODES = len(SORTED_NODES) # 81
-
-# --- 3. MODEL MİMARİSİ ---
 class Encoder(nn.Module):
-    def __init__(self, in_channels, hidden_channels, out_channels):
+    def __init__(self, in_channels, hidden_channels, out_channels, dropout_p=0.2):
         super().__init__()
         self.gcn1 = GCNConv(in_channels, hidden_channels)
         self.bn1 = nn.BatchNorm1d(hidden_channels)
         self.gcn2 = GCNConv(hidden_channels, hidden_channels)
         self.bn2 = nn.BatchNorm1d(hidden_channels)
-        self.dropout = nn.Dropout(0.2)
+        self.dropout = nn.Dropout(dropout_p)
         self.fc = nn.Linear(hidden_channels, out_channels)
 
     def forward(self, x, edge_index, edge_attr=None):
@@ -167,277 +38,310 @@ class Decoder(nn.Module):
         self.fc_out = nn.Linear(hidden_dim, out_dim)
 
 class GNNPathModel(nn.Module):
-    def __init__(self, in_channels, hidden_channels, out_channels, num_nodes, max_path_len, lstm_hidden_dim=512):
+    def __init__(self, in_channels, hidden_channels, out_channels, num_nodes, max_path_len):
         super().__init__()
+        # LSTM Hidden Dim sabit olarak eğitim kodundan alındı
+        lstm_hidden_dim = 512 
         self.encoder = Encoder(in_channels, hidden_channels, num_nodes)
         self.decoder = Decoder(num_nodes, lstm_hidden_dim, num_nodes)
 
-# --- 4. YARDIMCI FONKSİYONLAR ---
+# -----------------------------------------------------------------------------
+# 2. YARDIMCI FONKSİYONLAR
+# -----------------------------------------------------------------------------
 
 @st.cache_resource
-def load_ai_model():
-    model_path = 'Model3_2.pt'
+def load_model(model_path):
     try:
+        # Önce state_dict yükleyip boyutları analiz edelim
         state_dict = torch.load(model_path, map_location=torch.device('cpu'))
-        # Otomatik boyut algılama
-        if 'encoder.fc.weight' in state_dict:
-            weight_shape = state_dict['encoder.fc.weight'].shape
-            num_nodes = weight_shape[0]  # Modelin eğitildiği node sayısı
-            hidden_dim = weight_shape[1]
-            lstm_dim = state_dict.get('decoder.fc_out.weight', torch.zeros(1, 512)).shape[1]
-        else:
-            return None
-
-        model = GNNPathModel(6, hidden_dim, num_nodes, num_nodes, 50, lstm_dim)
+        
+        # Modelin eğitildiği output layer boyutunu bul (num_nodes)
+        weight_shape = state_dict['decoder.fc_out.weight'].shape
+        num_nodes_trained = weight_shape[0]  # Output dim (e.g., 82)
+        
+        # Hyperparametreler (Eğitim kodunuzdaki varsayılanlar)
+        hidden_channels = 256
+        in_channels = 6  # 4 features + 2 masks
+        out_channels = num_nodes_trained
+        max_path_len = 100 # Sembolik, mimariyi etkilemez
+        
+        model = GNNPathModel(in_channels, hidden_channels, out_channels, num_nodes_trained, max_path_len)
         model.load_state_dict(state_dict)
         model.eval()
-        return model
-    except:
-        return None
+        return model, num_nodes_trained
+    except Exception as e:
+        st.error(f"Model yüklenirken hata oluştu: {e}")
+        return None, 0
 
-def create_randomized_graph(min_w, max_w):
-    """Türkiye haritasını oluşturur ancak ağırlıkları rastgele atar"""
-    G = nx.Graph()
-    # Düğümleri ekle
-    for node in SORTED_NODES:
-        G.add_node(node)
+def get_graph_features(G, num_nodes_trained):
+    """
+    Eğitim verisindeki feature extraction mantığını uygular.
+    """
+    # Gerekirse düğüm sayısını eşitlemek için padding yapılabilir ama
+    # burada sadece mevcut grafın özelliklerini alacağız.
     
-    # Kenarları ekle (Ağırlıkları rastgele ver)
-    for u, edges in RAW_GRAPH_DATA.items():
-        for v, _ in edges:
-            if not G.has_edge(u, v):
-                w = random.randint(min_w, max_w)
-                G.add_edge(u, v, weight=w)
+    # Featurelar: Degree, Centrality, Clustering, PageRank
+    degree = np.array([val for (node, val) in G.degree()])
+    centrality = np.array([val for (node, val) in nx.betweenness_centrality(G).items()])
+    clustering = np.array([val for (node, val) in nx.clustering(G).items()])
+    pagerank = np.array([val for (node, val) in nx.pagerank(G).items()])
+
+    # Reshape
+    degree = degree.reshape(-1, 1)
+    centrality = centrality.reshape(-1, 1)
+    clustering = clustering.reshape(-1, 1)
+    pagerank = pagerank.reshape(-1, 1)
+
+    base_features = np.concatenate([degree, centrality, clustering, pagerank], axis=1)
+    return torch.tensor(base_features, dtype=torch.float)
+
+def safe_mask_logits(logits, allowed_indices):
+    all_indices = set(range(logits.shape[-1]))
+    mask_indices = torch.tensor(list(all_indices - set(allowed_indices)), dtype=torch.long)
+    logits = logits.clone()
+    if logits.dim() == 2:
+        logits[0, mask_indices] = -float('inf')
+    else:
+        logits[mask_indices] = -float('inf')
+    return logits
+
+def get_neighbors(edge_index, num_nodes):
+    neighbors = [[] for _ in range(num_nodes)]
+    for i in range(edge_index.size(1)):
+        src, dst = edge_index[:, i]
+        neighbors[src.item()].append(dst.item())
+        neighbors[dst.item()].append(src.item()) # Undirected
+    return neighbors
+
+def run_ai_inference(model, G, start_node, end_node, num_nodes_trained):
+    """
+    Eğitilmiş modeli kullanarak yol tahmini yapar.
+    """
+    # 1. Grafı PyG formatına çevir
+    adj = nx.to_numpy_array(G)
+    edge_index = []
+    edge_attr = [] # Ağırlıklar (model kullanıyorsa)
     
-    pos = nx.spring_layout(G, seed=42, k=0.15, iterations=50)
-    return G, pos
+    for i in range(len(adj)):
+        for j in range(len(adj)):
+            if adj[i][j] != 0:
+                edge_index.append([i, j])
+                edge_attr.append([adj[i][j]])
+    
+    edge_index = torch.tensor(edge_index, dtype=torch.long).t().contiguous()
+    edge_attr = torch.tensor(edge_attr, dtype=torch.float)
 
-def prepare_features_for_ai(G, start_node, end_node):
-    # Modelin tanıdığı sırayla özellik çıkar
-    degree = np.array([val for (node, val) in G.degree(SORTED_NODES)])
-    centrality = np.array([nx.betweenness_centrality(G)[n] for n in SORTED_NODES])
-    clustering = np.array([nx.clustering(G)[n] for n in SORTED_NODES])
-    pagerank = np.array([nx.pagerank(G)[n] for n in SORTED_NODES])
-
-    features = np.column_stack((degree, centrality, clustering, pagerank))
-    base_features = torch.tensor(features, dtype=torch.float)
-
-    start_mask = torch.zeros(NUM_NODES, 1)
-    end_mask = torch.zeros(NUM_NODES, 1)
-    start_mask[NODE_TO_IDX[start_node]] = 1
-    end_mask[NODE_TO_IDX[end_node]] = 1
-
-    # [81, 6]
+    # 2. Featureları hazırla
+    base_features = get_graph_features(G, num_nodes_trained)
+    
+    # Eğer oluşturulan graf modelin eğitim grafından küçükse, featureları pad etmeliyiz
+    # Çünkü Linear katmanlar sabit boyut bekler.
+    current_nodes = base_features.shape[0]
+    if current_nodes < num_nodes_trained:
+        pad_size = num_nodes_trained - current_nodes
+        padding = torch.zeros(pad_size, 4)
+        base_features = torch.cat([base_features, padding], dim=0)
+    
+    # Masklar
+    start_mask = torch.zeros(num_nodes_trained, 1)
+    end_mask = torch.zeros(num_nodes_trained, 1)
+    start_mask[start_node] = 1
+    end_mask[end_node] = 1
+    
     x = torch.cat([base_features, start_mask, end_mask], dim=1)
-
-    edges = []
-    for u, v in G.edges():
-        edges.append([NODE_TO_IDX[u], NODE_TO_IDX[v]])
-        edges.append([NODE_TO_IDX[v], NODE_TO_IDX[u]])
     
-    edge_index = torch.tensor(edges, dtype=torch.long).t().contiguous()
-    
-    return x, edge_index
-
-def run_ai_inference(model, G, start_node, end_node):
-    x, edge_index = prepare_features_for_ai(G, start_node, end_node)
-    
-    t_start = time.perf_counter()
-    start_idx = NODE_TO_IDX[start_node]
-    end_idx = NODE_TO_IDX[end_node]
-    path_indices = [start_idx]
+    # 3. Model Tahmini
+    path = [start_node]
+    visited = set([start_node])
     
     with torch.no_grad():
-        node_emb = model.encoder(x, edge_index)
-        input_emb = node_emb[start_idx].unsqueeze(0).unsqueeze(0)
-        hidden = None
-        curr = start_idx
+        node_emb = model.encoder(x, edge_index, edge_attr) # edge_attr opsiyonel, modelde varsa kullanılır
+        neighbors = get_neighbors(edge_index, num_nodes_trained)
         
-        for _ in range(50):
+        input_emb = node_emb[start_node].unsqueeze(0).unsqueeze(0)
+        hidden = None
+        curr_idx = start_node
+        
+        for _ in range(num_nodes_trained): # Max adım sayısı
             out, hidden = model.decoder.lstm(input_emb, hidden)
             logits = model.decoder.fc_out(out.squeeze(1))
             
-            # --- INDEX HATASINI ÇÖZEN BÖLÜM ---
-            curr_node_name = SORTED_NODES[curr]
-            neighbors = list(G.neighbors(curr_node_name))
+            # Masking (Gidilebilecek komşular)
+            # Dikkat: Rastgele grafın komşuları, eğitim grafının indekslerinden farklıdır.
+            # Ancak model topolojiyi GCN ile öğrendiği için node_emb üzerinden karar verir.
             
-            # Komşuların indexlerini al, ancak modelin boyutunu aşanları ele
-            model_vocab_size = logits.size(1) # Örn: 40
-            valid_neighbor_indices = []
+            current_neighbors = []
+            if curr_idx < len(neighbors):
+                current_neighbors = neighbors[curr_idx]
             
-            for n in neighbors:
-                idx = NODE_TO_IDX[n]
-                # Eğer haritadaki şehir indeksi, modelin bildiği şehirlerden büyükse onu yok say
-                if idx < model_vocab_size:
-                    valid_neighbor_indices.append(idx)
+            allowed = set(current_neighbors) - visited
             
-            # Gidecek geçerli bir komşu yoksa dur
-            if not valid_neighbor_indices: break
-
-            full_mask = torch.ones_like(logits) * -float('inf')
-            valid_indices_tensor = torch.tensor(valid_neighbor_indices, dtype=torch.long)
+            # Eğer hedef komşudaysa oraya gitmeye zorla/izin ver
+            if end_node in current_neighbors:
+                allowed.add(end_node)
             
-            # Güvenli atama
-            if valid_indices_tensor.max() < logits.size(1):
-                full_mask[0, valid_indices_tensor] = logits[0, valid_indices_tensor]
-                pred_idx = full_mask.argmax(dim=-1).item()
+            if not allowed:
+                break
                 
-                if pred_idx == curr: break 
-                
-                path_indices.append(pred_idx)
-                curr = pred_idx
-                input_emb = node_emb[pred_idx].unsqueeze(0).unsqueeze(0)
-                
-                if curr == end_idx: break
-            else:
+            logits = safe_mask_logits(logits, allowed)
+            pred_node = logits.argmax(dim=-1).item()
+            
+            path.append(pred_node)
+            visited.add(pred_node)
+            
+            if pred_node == end_node:
                 break
             
-    t_end = time.perf_counter()
-    return (t_end - t_start) * 1000, [SORTED_NODES[i] for i in path_indices]
-
-# --- 5. ALGORİTMALAR ---
-def dijkstra_algo(graph, start, goal):
-    queue = [(0, start, [])]
-    visited = set()
-    while queue:
-        cost, node, path = heapq.heappop(queue)
-        if node in visited: continue
-        visited.add(node)
-        path = path + [node]
-        if node == goal: return cost, path
-        for neighbor, attr in graph[node].items():
-            if neighbor not in visited:
-                heapq.heappush(queue, (cost + attr['weight'], neighbor, path))
-    return 0, []
-
-def bellman_ford_algo(graph, start, goal):
-    try:
-        path = nx.bellman_ford_path(graph, start, goal, weight='weight')
-        cost = nx.bellman_ford_path_length(graph, start, goal, weight='weight')
-        return cost, path
-    except:
-        return 0, []
-
-def a_star_algo(graph, start, goal):
-    try:
-        path = nx.astar_path(graph, start, goal, weight='weight')
-        cost = nx.shortest_path_length(graph, start, goal, weight='weight')
-        return cost, path
-    except:
-        return 0, []
-
-# --- 6. SIDEBAR ---
-with st.sidebar:
-    st.image("https://upload.wikimedia.org/wikipedia/tr/6/62/Gazi_%C3%9Cniversitesi_Logosu.png", width=100)
-    st.title("Türkiye Rota Analizi")
-    st.markdown("---")
-    
-    st.subheader("🛠️ Harita Ayarları")
-    min_w = st.number_input("Min Yol Maliyeti", 1, 50, 1)
-    max_w = st.number_input("Max Yol Maliyeti", 1, 50, 20)
-    
-    if st.button("🔄 Trafiği (Ağırlıkları) Yenile"):
-        st.session_state['G'], st.session_state['pos'] = create_randomized_graph(min_w, max_w)
-        st.success("Yeni trafik durumu oluşturuldu!")
-
-    st.markdown("---")
-    col1, col2 = st.columns(2)
-    start_city = col1.selectbox("Başlangıç", SORTED_NODES, index=34)
-    end_city = col2.selectbox("Hedef", SORTED_NODES, index=6)
-    
-    if st.button("🚀 Hesapla"):
-        st.session_state['run'] = True
-
-if 'G' not in st.session_state:
-    st.session_state['G'], st.session_state['pos'] = create_randomized_graph(1, 20)
-
-G = st.session_state['G']
-pos = st.session_state['pos']
-
-# --- 7. ANA EKRAN ---
-if 'run' in st.session_state and st.session_state['run']:
-    ai_model = load_ai_model()
-    results = []
-    
-    # 1. Dijkstra
-    t1 = time.perf_counter()
-    d_cost, d_path = dijkstra_algo(G, start_city, end_city)
-    d_time = (time.perf_counter() - t1) * 1000
-    results.append({"Algoritma": "Dijkstra", "Süre (ms)": d_time, "Maliyet": d_cost, "Yol": d_path})
-    
-    # 2. A*
-    t1 = time.perf_counter()
-    a_cost, a_path = a_star_algo(G, start_city, end_city)
-    a_time = (time.perf_counter() - t1) * 1000
-    results.append({"Algoritma": "A*", "Süre (ms)": a_time, "Maliyet": a_cost, "Yol": a_path})
-    
-    # 3. Bellman-Ford
-    t1 = time.perf_counter()
-    b_cost, b_path = bellman_ford_algo(G, start_city, end_city)
-    b_time = (time.perf_counter() - t1) * 1000
-    results.append({"Algoritma": "Bellman-Ford", "Süre (ms)": b_time, "Maliyet": b_cost, "Yol": b_path})
-    
-    # 4. Yapay Zeka
-    if ai_model:
-        ai_time, ai_path = run_ai_inference(ai_model, G, start_city, end_city)
-        ai_cost = 0
-        if len(ai_path) > 1:
-            for i in range(len(ai_path)-1):
-                if G.has_edge(ai_path[i], ai_path[i+1]):
-                    ai_cost += G[ai_path[i]][ai_path[i+1]]['weight']
-        results.append({"Algoritma": "Yapay Zeka (GNN)", "Süre (ms)": ai_time, "Maliyet": ai_cost, "Yol": ai_path})
-    
-    df_res = pd.DataFrame(results)
-
-    st.subheader(f"🗺️ Rota Analizi: {start_city} ➝ {end_city}")
-    
-    with st.container():
-        st.markdown('<div class="map-container">', unsafe_allow_html=True)
-        plt.figure(figsize=(14, 8))
-        fig, ax = plt.subplots(figsize=(14, 8))
-        fig.patch.set_facecolor(COLOR_BG_LIGHT)
-        ax.set_facecolor(COLOR_BG_LIGHT)
-        
-        nx.draw_networkx_nodes(G, pos, node_size=100, node_color="#B0BEC5", ax=ax)
-        nx.draw_networkx_edges(G, pos, edge_color="#CFD8DC", width=1, ax=ax)
-        
-        path_width = 4
-        
-        if d_path:
-            edges = list(zip(d_path, d_path[1:]))
-            nx.draw_networkx_edges(G, pos, edgelist=edges, edge_color=COLOR_NODE_BRIGHT, width=path_width+2, label="Dijkstra", ax=ax)
+            curr_idx = pred_node
+            input_emb = node_emb[curr_idx].unsqueeze(0).unsqueeze(0)
             
-        ai_res = next((r for r in results if r["Algoritma"] == "Yapay Zeka (GNN)"), None)
-        if ai_res and ai_res["Yol"]:
-            edges = list(zip(ai_res["Yol"], ai_res["Yol"][1:]))
-            nx.draw_networkx_edges(G, pos, edgelist=edges, edge_color=COLOR_AI_CYAN, width=path_width, style='solid', label="Yapay Zeka", ax=ax)
+    return path
 
-        nx.draw_networkx_nodes(G, pos, nodelist=[start_city], node_color="green", node_size=300, ax=ax, label="Başlangıç")
-        nx.draw_networkx_nodes(G, pos, nodelist=[end_city], node_color="red", node_size=300, ax=ax, label="Hedef")
-        
-        ax.legend(loc='upper left', frameon=True)
-        st.pyplot(fig, use_container_width=True)
-        st.markdown('</div>', unsafe_allow_html=True)
+# -----------------------------------------------------------------------------
+# 3. STREAMLIT ARAYÜZÜ
+# -----------------------------------------------------------------------------
 
-    col1, col2 = st.columns([1, 1])
+st.set_page_config(page_title="AI vs Algorithms: Pathfinding", layout="wide")
+st.title("🗺️ AI Destekli Yol Bulma Algoritmaları Karşılaştırması")
+
+# Sidebar - Ayarlar
+st.sidebar.header("Harita Ayarları")
+
+# Model Yükleme
+model_path = "Model3_2.pt" # Github reponuzda bu dosya aynı dizinde olmalı
+model, max_trained_nodes = load_model(model_path)
+
+if model:
+    st.sidebar.success(f"Model Yüklendi! (Maksimum Node Kapasitesi: {max_trained_nodes})")
+else:
+    st.sidebar.error("Model dosyası (Model3_2.pt) bulunamadı.")
+    st.stop()
+
+# Harita Parametreleri
+num_nodes = st.sidebar.slider("Düğüm Sayısı (Node Count)", min_value=5, max_value=max_trained_nodes, value=20)
+edge_prob = st.sidebar.slider("Bağlantı Olasılığı (Edge Probability)", 0.1, 1.0, 0.3)
+min_weight = st.sidebar.number_input("Min Edge Ağırlığı", 1, 10, 1)
+max_weight = st.sidebar.number_input("Max Edge Ağırlığı", 10, 100, 20)
+
+if st.sidebar.button("Yeni Harita Oluştur"):
+    # Rastgele Graf Oluşturma
+    # Connected olması için döngü
+    connected = False
+    while not connected:
+        G = nx.erdos_renyi_graph(n=num_nodes, p=edge_prob, seed=None)
+        if nx.is_connected(G):
+            connected = True
+    
+    # Ağırlık atama
+    for (u, v) in G.edges():
+        G.edges[u, v]['weight'] = np.random.randint(min_weight, max_weight + 1)
+    
+    # Layout belirle ve kaydet (Görsel tutarlılık için)
+    pos = nx.spring_layout(G, seed=42)
+    st.session_state['G'] = G
+    st.session_state['pos'] = pos
+    st.session_state['map_generated'] = True
+
+# Harita varsa işlem yap
+if 'map_generated' in st.session_state and st.session_state['map_generated']:
+    G = st.session_state['G']
+    pos = st.session_state['pos']
+    
+    col1, col2 = st.columns([1, 3])
+    
     with col1:
-        st.markdown("### 📊 Performans Tablosu")
-        st.dataframe(
-            df_res[["Algoritma", "Süre (ms)", "Maliyet", "Yol"]].style.format({"Süre (ms)": "{:.4f}"}),
-            use_container_width=True
-        )
+        st.subheader("Yol Seçimi")
+        nodes = list(G.nodes())
+        start_node = st.selectbox("Başlangıç (Start)", nodes, index=0)
+        end_node = st.selectbox("Bitiş (End)", nodes, index=len(nodes)-1)
+        
+        run_btn = st.button("Algoritmaları Çalıştır")
+
     with col2:
-        st.markdown("### ⏱️ Hız Karşılaştırması")
-        chart = alt.Chart(df_res).mark_bar().encode(
-            x=alt.X('Süre (ms)', title='Hesaplama Süresi (ms)'),
-            y=alt.Y('Algoritma', sort='-x'),
-            color=alt.Color('Algoritma', scale=alt.Scale(
-                domain=['Dijkstra', 'A*', 'Bellman-Ford', 'Yapay Zeka (GNN)'],
-                range=[COLOR_NODE_BRIGHT, '#F39C12', '#9B59B6', COLOR_AI_CYAN]
-            )),
-            tooltip=['Algoritma', 'Süre (ms)', 'Maliyet']
-        ).properties(height=300)
-        st.altair_chart(chart, use_container_width=True)
+        # Haritayı Çiz (Temiz Hal)
+        fig, ax = plt.subplots(figsize=(10, 6))
+        nx.draw(G, pos, ax=ax, with_labels=True, node_color='lightgray', edge_color='gray', node_size=500)
+        edge_labels = nx.get_edge_attributes(G, 'weight')
+        nx.draw_networkx_edge_labels(G, pos, edge_labels=edge_labels, font_size=8)
+        
+        if run_btn:
+            results = []
+            
+            # 1. Dijkstra
+            try:
+                dijkstra_path = nx.dijkstra_path(G, start_node, end_node, weight='weight')
+                dijkstra_len = nx.dijkstra_path_length(G, start_node, end_node, weight='weight')
+                results.append(("Dijkstra", dijkstra_path, dijkstra_len, 'red', 'solid'))
+            except nx.NetworkXNoPath:
+                st.warning("Dijkstra yol bulamadı.")
+
+            # 2. A* (Heuristic = 0, Dijkstra gibi davranır ama yapı olarak A*)
+            try:
+                astar_path = nx.astar_path(G, start_node, end_node, weight='weight')
+                # A* için maliyet hesapla
+                astar_len = sum(G[u][v]['weight'] for u, v in zip(astar_path[:-1], astar_path[1:]))
+                results.append(("A*", astar_path, astar_len, 'blue', 'dashed'))
+            except nx.NetworkXNoPath:
+                pass
+
+            # 3. Bellman-Ford
+            try:
+                bellman_path = nx.bellman_ford_path(G, start_node, end_node, weight='weight')
+                bellman_len = sum(G[u][v]['weight'] for u, v in zip(bellman_path[:-1], bellman_path[1:]))
+                results.append(("Bellman-Ford", bellman_path, bellman_len, 'purple', 'dotted'))
+            except nx.NetworkXNoPath:
+                pass
+
+            # 4. AI Model
+            try:
+                ai_path = run_ai_inference(model, G, start_node, end_node, max_trained_nodes)
+                # AI yol maliyeti (Eğer geçerli bir yol ise)
+                ai_len = 0
+                valid_ai_path = True
+                for u, v in zip(ai_path[:-1], ai_path[1:]):
+                    if G.has_edge(u, v):
+                        ai_len += G[u][v]['weight']
+                    else:
+                        valid_ai_path = False
+                        ai_len = float('inf')
+                
+                label = "AI Model" + (" (Geçersiz Yol)" if not valid_ai_path else "")
+                results.append((label, ai_path, ai_len, 'green', 'dashdot'))
+            except Exception as e:
+                st.error(f"AI Model hatası: {e}")
+
+            # Sonuçları Görselleştir
+            offset = 0
+            st.write("### Sonuçlar")
+            res_col1, res_col2, res_col3, res_col4 = st.columns(4)
+            
+            cols = [res_col1, res_col2, res_col3, res_col4]
+            
+            for idx, (name, path, length, color, style) in enumerate(results):
+                # Metrikleri yaz
+                cols[idx].metric(label=name, value=f"{length}", delta=f"Adım: {len(path)}")
+                
+                # Yolu çiz
+                path_edges = list(zip(path[:-1], path[1:]))
+                # Çizgileri üst üste binmemesi için hafif kaydırarak (width ve alpha ile) çiziyoruz
+                nx.draw_networkx_edges(G, pos, edgelist=path_edges, edge_color=color, width=4-(idx*0.5), style=style, label=name)
+            
+            plt.title(f"Yol Karşılaştırması: {start_node} -> {end_node}")
+            
+            # Legend oluşturma (Manuel handle ile)
+            from matplotlib.lines import Line2D
+            custom_lines = [Line2D([0], [0], color=r[3], lw=2, linestyle=r[4]) for r in results]
+            ax.legend(custom_lines, [r[0] for r in results])
+            
+            st.pyplot(fig)
+            
+            # Detaylı Yol Listesi
+            with st.expander("Detaylı Yol Listesi"):
+                for name, path, length, _, _ in results:
+                    st.write(f"**{name}:** {path} (Maliyet: {length})")
+
+        else:
+            st.pyplot(fig)
 
 else:
-    st.info("👈 Sol menüden başlangıç/bitiş seçip 'Hesapla' butonuna basın.")
+    st.info("Lütfen sol menüden 'Yeni Harita Oluştur' butonuna basın.")
