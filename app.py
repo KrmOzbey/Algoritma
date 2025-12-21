@@ -2,6 +2,8 @@ import streamlit as st
 import networkx as nx
 import matplotlib.pyplot as plt
 import pandas as pd
+import random
+import math
 import heapq
 import time
 import altair as alt
@@ -13,42 +15,37 @@ from torch_geometric.nn import GCNConv
 
 # --- 1. SAYFA VE STİL AYARLARI ---
 st.set_page_config(
-    page_title="AI vs Algoritmalar (Türkiye)",
+    page_title="AI Destekli Rota Optimizasyonu",
     layout="wide",
     initial_sidebar_state="expanded"
 )
 
 # --- RENK PALETİ ---
-COLOR_BG_LIGHT = "#E3F2FD"      
-COLOR_SIDEBAR_BG = "#154360"    
-COLOR_TEXT_MAIN = "#000000"     
-COLOR_SIDEBAR_TEXT_GRAY = "#B0BEC5"  
-COLOR_ACCENT_RED = "#C0392B"    
-COLOR_NODE_BRIGHT = "#3498DB"   
-COLOR_EDGE_LIGHT = "#90A4AE"    
-COLOR_CHART_TEXT = "#546E7A"    
-COLOR_AI_CYAN = "#00E5FF" 
+COLOR_BG_LIGHT = "#F0F2F6"
+COLOR_SIDEBAR_BG = "#263238"
+COLOR_TEXT_MAIN = "#000000"
+COLOR_SIDEBAR_TEXT = "#ECEFF1"
+COLOR_ACCENT = "#FF5252"  # Kırmızı butonlar
+COLOR_AI = "#00E676"      # Yapay Zeka Yeşili
+COLOR_DIJKSTRA = "#2979FF" # Dijkstra Mavisi
 
-# Özel CSS
 st.markdown(f"""
     <style>
         .stApp {{ background-color: {COLOR_BG_LIGHT}; }}
-        h1, h2, h3, h4, h5, p, span, li {{ color: {COLOR_TEXT_MAIN} !important; font-family: 'Segoe UI', sans-serif; }}
         [data-testid="stSidebar"] {{ background-color: {COLOR_SIDEBAR_BG}; }}
-        [data-testid="stSidebar"] * {{ color: {COLOR_SIDEBAR_TEXT_GRAY} !important; }}
+        [data-testid="stSidebar"] * {{ color: {COLOR_SIDEBAR_TEXT} !important; }}
         div.stButton > button {{
-            background-color: {COLOR_ACCENT_RED}; color: white !important; border: none;
-            border-radius: 6px; font-weight: bold; transition: 0.3s;
+            background-color: {COLOR_ACCENT}; color: white !important; border-radius: 8px; font-weight: bold;
         }}
         .map-container {{
-            box-shadow: 0 6px 14px rgba(0,0,0,0.2); border-radius: 4px; overflow: hidden;
-            padding: 5px; background-color: white; border: 2px solid {COLOR_SIDEBAR_BG};
+            border: 2px solid #CFD8DC; border-radius: 10px; overflow: hidden; background-color: white; padding: 10px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
         }}
     </style>
 """, unsafe_allow_html=True)
 
-# --- 2. TÜRKİYE HARİTASI VERİSİ (Sizin Kodunuzdan) ---
-TURKEY_GRAPH_DATA = {
+# --- 2. TÜRKİYE HARİTASI VERİSİ (SABİT TOPOLOJİ) ---
+RAW_GRAPH_DATA = {
     "Adana": [("Mersin", 6), ("Osmaniye", 14), ("Hatay", 8), ("Kahramanmaraş", 19), ("Niğde", 4)],
     "Adıyaman": [("Malatya", 15), ("Kahramanmaraş", 13), ("Gaziantep", 5), ("Şanlıurfa", 7)],
     "Afyonkarahisar": [("Uşak", 2), ("Kütahya", 17), ("Eskişehir", 9), ("Konya", 11), ("Isparta", 6), ("Denizli", 20)],
@@ -132,7 +129,12 @@ TURKEY_GRAPH_DATA = {
     "Zonguldak": [("Bartın", 17), ("Karabük", 18), ("Bolu", 7), ("Düzce", 9)]
 }
 
-# --- 3. YAPAY ZEKA MODELİ ---
+# Şehirleri alfabetik sıraya dizip indexleme (Eğitimdeki tutarlılık için şart)
+SORTED_NODES = sorted(list(RAW_GRAPH_DATA.keys()))
+NODE_TO_IDX = {node: i for i, node in enumerate(SORTED_NODES)}
+NUM_NODES = len(SORTED_NODES) # 81
+
+# --- 3. MODEL MİMARİSİ ---
 class Encoder(nn.Module):
     def __init__(self, in_channels, hidden_channels, out_channels):
         super().__init__()
@@ -165,133 +167,121 @@ class GNNPathModel(nn.Module):
         self.encoder = Encoder(in_channels, hidden_channels, num_nodes)
         self.decoder = Decoder(num_nodes, lstm_hidden_dim, num_nodes)
 
-# --- 4. GRAPH VE MODEL YÖNETİMİ ---
-
-@st.cache_resource
-def get_turkey_graph():
-    G = nx.Graph()
-    for node, edges in TURKEY_GRAPH_DATA.items():
-        for neighbor, weight in edges:
-            G.add_edge(node, neighbor, weight=weight)
-    
-    # Sabit bir düzen (Spring layout) hesapla ki harita hep aynı dursun
-    pos = nx.spring_layout(G, seed=42, k=0.15, iterations=20) 
-    return G, pos
+# --- 4. YARDIMCI FONKSİYONLAR ---
 
 @st.cache_resource
 def load_ai_model():
     model_path = 'Model3_2.pt'
     try:
+        # Otomatik boyut algılama
         state_dict = torch.load(model_path, map_location=torch.device('cpu'))
-        # Model boyutlarını dosyadan otomatik öğren
         if 'encoder.fc.weight' in state_dict:
             weight_shape = state_dict['encoder.fc.weight'].shape
-            num_nodes = weight_shape[0]  # Modelin eğitildiği node sayısı (e.g., 40)
+            num_nodes = weight_shape[0] # 81 olmalı
             hidden_dim = weight_shape[1]
             lstm_dim = state_dict.get('decoder.fc_out.weight', torch.zeros(1, 512)).shape[1]
         else:
-            return None, 0
+            return None
 
-        # Modeli başlat
         model = GNNPathModel(6, hidden_dim, num_nodes, num_nodes, 50, lstm_dim)
         model.load_state_dict(state_dict)
         model.eval()
-        return model, num_nodes
+        return model
     except:
-        return None, 0
+        return None
 
-def prepare_data_for_ai(G, start_node, end_node, model_node_count):
-    # Haritadaki şehirleri al
-    sorted_nodes = sorted(list(G.nodes))
-    node_to_idx = {node: i for i, node in enumerate(sorted_nodes)}
-    start_idx = node_to_idx[start_node]
-    end_idx = node_to_idx[end_node]
+def create_randomized_graph(min_w, max_w):
+    """Türkiye haritasını oluşturur ancak ağırlıkları rastgele atar"""
+    G = nx.Graph()
+    # Düğümleri ekle
+    for node in SORTED_NODES:
+        G.add_node(node)
     
-    # --- CRITICAL FIX: GCNConv Crash Önleme ---
-    # x (feature matrix) boyutunu HARİTA BOYUTUNA (81) göre ayarla
-    num_nodes_actual = len(sorted_nodes)
+    # Kenarları ekle (Ağırlıkları rastgele ver)
+    for u, edges in RAW_GRAPH_DATA.items():
+        for v, _ in edges:
+            if not G.has_edge(u, v): # Tekrar eklemeyi önle
+                w = random.randint(min_w, max_w)
+                G.add_edge(u, v, weight=w)
     
-    # Feature hesaplama (Dummy, çünkü GNN topolojiyi öğrendi)
-    # Boyut: [81, 4]
-    base_features = torch.zeros(num_nodes_actual, 4) 
-    
-    # Maskeler
-    start_mask = torch.zeros(num_nodes_actual, 1)
-    end_mask = torch.zeros(num_nodes_actual, 1)
-    start_mask[start_idx] = 1
-    end_mask[end_idx] = 1
-    
-    # x matrisi: [81, 6] (RuntimeError'ı çözen yer burası)
+    # Sabit konumlandırma (Türkiye haritası şekli için)
+    # Gerçek koordinatları olmadığından spring layout ile sabitliyoruz
+    pos = nx.spring_layout(G, seed=42, k=0.15, iterations=50)
+    return G, pos
+
+def prepare_features_for_ai(G, start_node, end_node):
+    # NetworkX metriklerini hesapla (Eğitimdeki gibi)
+    degree = np.array([val for (node, val) in G.degree(SORTED_NODES)])
+    centrality = np.array([val for (node, val) in nx.betweenness_centrality(G).items()])
+    # Sıralamanın SORTED_NODES ile aynı olduğundan emin olmak için liste comprehension kullanıyoruz
+    centrality = np.array([nx.betweenness_centrality(G)[n] for n in SORTED_NODES])
+    clustering = np.array([nx.clustering(G)[n] for n in SORTED_NODES])
+    pagerank = np.array([nx.pagerank(G)[n] for n in SORTED_NODES])
+
+    # Feature Matrix [81, 4]
+    features = np.column_stack((degree, centrality, clustering, pagerank))
+    base_features = torch.tensor(features, dtype=torch.float)
+
+    # Maskeler [81, 1]
+    start_mask = torch.zeros(NUM_NODES, 1)
+    end_mask = torch.zeros(NUM_NODES, 1)
+    start_mask[NODE_TO_IDX[start_node]] = 1
+    end_mask[NODE_TO_IDX[end_node]] = 1
+
+    # X [81, 6]
     x = torch.cat([base_features, start_mask, end_mask], dim=1)
-    
-    # Edge Index (81 düğüm üzerinden)
+
+    # Edge Index
     edges = []
     for u, v in G.edges():
-        if u in node_to_idx and v in node_to_idx:
-            edges.append([node_to_idx[u], node_to_idx[v]])
-            edges.append([node_to_idx[v], node_to_idx[u]])
-            
+        edges.append([NODE_TO_IDX[u], NODE_TO_IDX[v]])
+        edges.append([NODE_TO_IDX[v], NODE_TO_IDX[u]])
+    
     edge_index = torch.tensor(edges, dtype=torch.long).t().contiguous()
     
-    return x, edge_index, sorted_nodes, node_to_idx
+    return x, edge_index
 
-def run_ai_inference(model, G, start_node, end_node, model_node_count):
-    x, edge_index, sorted_nodes, node_to_idx = prepare_data_for_ai(G, start_node, end_node, model_node_count)
-    start_idx = node_to_idx[start_node]
-    end_idx = node_to_idx[end_node]
+def run_ai_inference(model, G, start_node, end_node):
+    x, edge_index = prepare_features_for_ai(G, start_node, end_node)
     
     t_start = time.perf_counter()
+    start_idx = NODE_TO_IDX[start_node]
+    end_idx = NODE_TO_IDX[end_node]
     path_indices = [start_idx]
     
     with torch.no_grad():
-        # Encoder (GCNConv): Input [81, 6] -> Output [81, 40] (Eğer model 40 node ile eğitildiyse)
         node_emb = model.encoder(x, edge_index)
-        
-        # Decoder (LSTM)
         input_emb = node_emb[start_idx].unsqueeze(0).unsqueeze(0)
         hidden = None
         curr = start_idx
         
         for _ in range(50):
             out, hidden = model.decoder.lstm(input_emb, hidden)
-            # Logits boyutu: [1, 40] (Modelin kelime dağarcığı)
             logits = model.decoder.fc_out(out.squeeze(1))
             
-            # Maskeleme: Sadece geçerli komşulara git
-            curr_node_name = sorted_nodes[curr]
+            # Maskeleme: Sadece komşulara git
+            curr_node_name = SORTED_NODES[curr]
             neighbors = list(G.neighbors(curr_node_name))
+            neighbor_indices = [NODE_TO_IDX[n] for n in neighbors]
             
-            # Modelin tahmin edebileceği index sınırları içinde kalan komşuları filtrele
-            # Eğer model 40 node biliyorsa, index > 39 olan komşulara GİDEMEZ.
-            model_vocab_size = logits.size(1)
-            valid_neighbors = [n for n in neighbors if node_to_idx[n] < model_vocab_size]
-            neighbor_indices = [node_to_idx[n] for n in valid_neighbors]
-            
-            # Eğer gidecek geçerli bir komşu yoksa (hepsi model sınırının dışındaysa) dur.
-            if not neighbor_indices:
-                break
+            if not neighbor_indices: break
 
-            # Logits maskeleme
             full_mask = torch.ones_like(logits) * -float('inf')
-            valid_indices_tensor = torch.tensor(neighbor_indices, dtype=torch.long)
+            valid_indices = torch.tensor(neighbor_indices, dtype=torch.long)
             
-            if len(valid_indices_tensor) > 0:
-                full_mask[0, valid_indices_tensor] = logits[0, valid_indices_tensor]
-                pred_idx = full_mask.argmax(dim=-1).item()
-                
-                if pred_idx == curr: break 
-                
-                path_indices.append(pred_idx)
-                curr = pred_idx
-                input_emb = node_emb[pred_idx].unsqueeze(0).unsqueeze(0)
-                
-                if curr == end_idx: break
-            else:
-                break
-                
+            full_mask[0, valid_indices] = logits[0, valid_indices]
+            pred_idx = full_mask.argmax(dim=-1).item()
+            
+            if pred_idx == curr: break 
+            
+            path_indices.append(pred_idx)
+            curr = pred_idx
+            input_emb = node_emb[pred_idx].unsqueeze(0).unsqueeze(0)
+            
+            if curr == end_idx: break
+            
     t_end = time.perf_counter()
-    final_path = [sorted_nodes[i] for i in path_indices]
-    return (t_end - t_start) * 1000, final_path
+    return (t_end - t_start) * 1000, [SORTED_NODES[i] for i in path_indices]
 
 # --- 5. ALGORİTMALAR ---
 def dijkstra_algo(graph, start, goal):
@@ -317,6 +307,7 @@ def bellman_ford_algo(graph, start, goal):
         return 0, []
 
 def a_star_algo(graph, start, goal):
+    # Heuristic olmadığı için Dijkstra gibi davranır (veya 0 heuristic)
     try:
         path = nx.astar_path(graph, start, goal, weight='weight')
         cost = nx.shortest_path_length(graph, start, goal, weight='weight')
@@ -324,30 +315,39 @@ def a_star_algo(graph, start, goal):
     except:
         return 0, []
 
-# --- 6. ARAYÜZ ---
-G, pos = get_turkey_graph()
-sorted_cities = sorted(list(G.nodes))
-
+# --- 6. SIDEBAR & STATE YÖNETİMİ ---
 with st.sidebar:
     st.image("https://upload.wikimedia.org/wikipedia/tr/6/62/Gazi_%C3%9Cniversitesi_Logosu.png", width=100)
     st.title("Türkiye Rota Analizi")
     st.markdown("---")
     
+    st.subheader("🛠️ Harita Ayarları")
+    min_w = st.number_input("Min Yol Maliyeti", 1, 50, 1)
+    max_w = st.number_input("Max Yol Maliyeti", 1, 50, 20)
+    
+    if st.button("🔄 Trafiği (Ağırlıkları) Yenile"):
+        st.session_state['G'], st.session_state['pos'] = create_randomized_graph(min_w, max_w)
+        st.success("Yeni trafik durumu oluşturuldu!")
+
+    st.markdown("---")
     col1, col2 = st.columns(2)
-    start_city = col1.selectbox("Başlangıç", sorted_cities, index=0) # Adana
-    end_city = col2.selectbox("Hedef", sorted_cities, index=6) # Ankara
+    start_city = col1.selectbox("Başlangıç", SORTED_NODES, index=34) # İstanbul
+    end_city = col2.selectbox("Hedef", SORTED_NODES, index=6)   # Ankara
     
-    st.markdown("### Algoritma Seçimi")
-    view_option = st.radio("Görünüm:", ["Karşılaştırmalı (Hepsi)", "Tekil Analiz"])
-    
-    if st.button("🚀 Rotayı Hesapla", type="primary"):
+    if st.button("🚀 Hesapla"):
         st.session_state['run'] = True
 
-# --- 7. ÇALIŞTIRMA VE SONUÇLAR ---
+# İlk yüklemede graf oluştur
+if 'G' not in st.session_state:
+    st.session_state['G'], st.session_state['pos'] = create_randomized_graph(1, 20)
+
+G = st.session_state['G']
+pos = st.session_state['pos']
+
+# --- 7. ANA EKRAN ---
 if 'run' in st.session_state and st.session_state['run']:
-    
+    ai_model = load_ai_model()
     results = []
-    ai_model, ai_node_count = load_ai_model()
     
     # 1. Dijkstra
     t1 = time.perf_counter()
@@ -369,24 +369,20 @@ if 'run' in st.session_state and st.session_state['run']:
     
     # 4. Yapay Zeka
     if ai_model:
-        # Eğer model küçükse kullanıcıyı uyar
-        if ai_node_count < len(G.nodes):
-            st.warning(f"⚠️ Model kapasitesi ({ai_node_count} şehir), harita boyutundan ({len(G.nodes)} şehir) küçük. Model sadece ilk {ai_node_count} şehri kullanabilir.", icon="⚠️")
-            
-        ai_time, ai_path = run_ai_inference(ai_model, G, start_city, end_city, ai_node_count)
-        
-        ai_real_cost = 0
+        ai_time, ai_path = run_ai_inference(ai_model, G, start_city, end_city)
+        # AI maliyetini graf üzerinden hesapla (Doğrulama)
+        ai_cost = 0
         if len(ai_path) > 1:
             for i in range(len(ai_path)-1):
                 if G.has_edge(ai_path[i], ai_path[i+1]):
-                    ai_real_cost += G[ai_path[i]][ai_path[i+1]]['weight']
+                    ai_cost += G[ai_path[i]][ai_path[i+1]]['weight']
         
-        results.append({"Algoritma": "Yapay Zeka (GNN)", "Süre (ms)": ai_time, "Maliyet": ai_real_cost, "Yol": ai_path})
-
+        results.append({"Algoritma": "Yapay Zeka (GNN)", "Süre (ms)": ai_time, "Maliyet": ai_cost, "Yol": ai_path})
+    
     df_res = pd.DataFrame(results)
 
     # --- GÖRSELLEŞTİRME ---
-    st.subheader(f"🗺️ Rota: {start_city} ➝ {end_city}")
+    st.subheader(f"🗺️ Rota Analizi: {start_city} ➝ {end_city}")
     
     with st.container():
         st.markdown('<div class="map-container">', unsafe_allow_html=True)
@@ -395,41 +391,52 @@ if 'run' in st.session_state and st.session_state['run']:
         fig.patch.set_facecolor(COLOR_BG_LIGHT)
         ax.set_facecolor(COLOR_BG_LIGHT)
         
-        nx.draw_networkx_nodes(G, pos, node_size=100, node_color=COLOR_NODE_BRIGHT, ax=ax)
-        nx.draw_networkx_edges(G, pos, edge_color=COLOR_EDGE_LIGHT, alpha=0.5, ax=ax)
-        nx.draw_networkx_labels(G, pos, font_size=8, font_color='black', ax=ax)
+        # Tüm Harita
+        nx.draw_networkx_nodes(G, pos, node_size=100, node_color="#B0BEC5", ax=ax)
+        nx.draw_networkx_edges(G, pos, edge_color="#CFD8DC", width=1, ax=ax)
+        # Şehir İsimleri (Sadece az sayıda gösterilebilir veya hepsi)
+        # nx.draw_networkx_labels(G, pos, font_size=6, ax=ax) 
         
+        # Rotalar
         path_width = 4
         
         if d_path:
             edges = list(zip(d_path, d_path[1:]))
-            nx.draw_networkx_edges(G, pos, edgelist=edges, edge_color=COLOR_SIDEBAR_BG, width=path_width+2, label="Dijkstra", ax=ax)
+            nx.draw_networkx_edges(G, pos, edgelist=edges, edge_color=COLOR_DIJKSTRA, width=path_width+2, label="Dijkstra", ax=ax)
             
         ai_res = next((r for r in results if r["Algoritma"] == "Yapay Zeka (GNN)"), None)
         if ai_res and ai_res["Yol"]:
             edges = list(zip(ai_res["Yol"], ai_res["Yol"][1:]))
-            nx.draw_networkx_edges(G, pos, edgelist=edges, edge_color=COLOR_AI_CYAN, width=path_width, style='solid', label="Yapay Zeka", ax=ax)
+            nx.draw_networkx_edges(G, pos, edgelist=edges, edge_color=COLOR_AI, width=path_width, style='solid', label="Yapay Zeka", ax=ax)
 
-        nx.draw_networkx_nodes(G, pos, nodelist=[start_city], node_color="green", node_size=300, ax=ax)
-        nx.draw_networkx_nodes(G, pos, nodelist=[end_city], node_color="red", node_size=300, ax=ax)
+        # Başlangıç/Bitiş
+        nx.draw_networkx_nodes(G, pos, nodelist=[start_city], node_color="green", node_size=300, ax=ax, label="Başlangıç")
+        nx.draw_networkx_nodes(G, pos, nodelist=[end_city], node_color="red", node_size=300, ax=ax, label="Hedef")
         
-        ax.legend()
+        ax.legend(loc='upper left', frameon=True)
         st.pyplot(fig, use_container_width=True)
         st.markdown('</div>', unsafe_allow_html=True)
 
+    # --- TABLO VE GRAFİK ---
     col1, col2 = st.columns([1, 1])
     with col1:
-        st.markdown("### 📊 Sonuçlar")
-        st.dataframe(df_res[["Algoritma", "Süre (ms)", "Maliyet", "Yol"]], use_container_width=True)
-    
+        st.markdown("### 📊 Performans Tablosu")
+        st.dataframe(
+            df_res[["Algoritma", "Süre (ms)", "Maliyet", "Yol"]].style.format({"Süre (ms)": "{:.4f}"}),
+            use_container_width=True
+        )
     with col2:
-        st.markdown("### ⏱️ Süre Karşılaştırması")
+        st.markdown("### ⏱️ Hız Karşılaştırması")
         chart = alt.Chart(df_res).mark_bar().encode(
-            x='Süre (ms)',
+            x=alt.X('Süre (ms)', title='Hesaplama Süresi (ms)'),
             y=alt.Y('Algoritma', sort='-x'),
-            color=alt.Color('Algoritma', scale=alt.Scale(domain=['Dijkstra', 'A*', 'Bellman-Ford', 'Yapay Zeka (GNN)'], range=[COLOR_SIDEBAR_BG, '#F39C12', '#9B59B6', COLOR_AI_CYAN]))
+            color=alt.Color('Algoritma', scale=alt.Scale(
+                domain=['Dijkstra', 'A*', 'Bellman-Ford', 'Yapay Zeka (GNN)'],
+                range=[COLOR_DIJKSTRA, '#F39C12', '#9B59B6', COLOR_AI]
+            )),
+            tooltip=['Algoritma', 'Süre (ms)', 'Maliyet']
         ).properties(height=300)
         st.altair_chart(chart, use_container_width=True)
 
 else:
-    st.info("Sol menüden şehirleri seçip 'Rotayı Hesapla' butonuna basın.")
+    st.info("👈 Sol menüden başlangıç/bitiş seçip 'Hesapla' butonuna basın.")
