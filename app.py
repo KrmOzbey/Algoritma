@@ -2,7 +2,6 @@ import streamlit as st
 import networkx as nx
 import matplotlib.pyplot as plt
 import pandas as pd
-import math
 import heapq
 import time
 import altair as alt
@@ -14,7 +13,7 @@ from torch_geometric.nn import GCNConv
 
 # --- 1. SAYFA VE STİL AYARLARI ---
 st.set_page_config(
-    page_title="AI vs Algoritmalar (Türkiye Haritası)",
+    page_title="AI vs Algoritmalar (Türkiye)",
     layout="wide",
     initial_sidebar_state="expanded"
 )
@@ -48,7 +47,7 @@ st.markdown(f"""
     </style>
 """, unsafe_allow_html=True)
 
-# --- 2. TÜRKİYE HARİTASI VERİSİ (SABİT GRAF) ---
+# --- 2. TÜRKİYE HARİTASI VERİSİ (Sizin Kodunuzdan) ---
 TURKEY_GRAPH_DATA = {
     "Adana": [("Mersin", 6), ("Osmaniye", 14), ("Hatay", 8), ("Kahramanmaraş", 19), ("Niğde", 4)],
     "Adıyaman": [("Malatya", 15), ("Kahramanmaraş", 13), ("Gaziantep", 5), ("Şanlıurfa", 7)],
@@ -133,7 +132,7 @@ TURKEY_GRAPH_DATA = {
     "Zonguldak": [("Bartın", 17), ("Karabük", 18), ("Bolu", 7), ("Düzce", 9)]
 }
 
-# --- 3. MODEL MİMARİSİ (Aynen Kalıyor) ---
+# --- 3. YAPAY ZEKA MODELİ ---
 class Encoder(nn.Module):
     def __init__(self, in_channels, hidden_channels, out_channels):
         super().__init__()
@@ -184,15 +183,16 @@ def load_ai_model():
     model_path = 'Model3_2.pt'
     try:
         state_dict = torch.load(model_path, map_location=torch.device('cpu'))
-        # Otomatik boyut algılama
+        # Model boyutlarını dosyadan otomatik öğren
         if 'encoder.fc.weight' in state_dict:
             weight_shape = state_dict['encoder.fc.weight'].shape
-            num_nodes = weight_shape[0]
+            num_nodes = weight_shape[0]  # Modelin eğitildiği node sayısı (e.g., 40)
             hidden_dim = weight_shape[1]
             lstm_dim = state_dict.get('decoder.fc_out.weight', torch.zeros(1, 512)).shape[1]
         else:
             return None, 0
 
+        # Modeli başlat
         model = GNNPathModel(6, hidden_dim, num_nodes, num_nodes, 50, lstm_dim)
         model.load_state_dict(state_dict)
         model.eval()
@@ -201,42 +201,30 @@ def load_ai_model():
         return None, 0
 
 def prepare_data_for_ai(G, start_node, end_node, model_node_count):
-    # Haritadaki şehirlerin indeks haritası (Eğitimdeki sıra ile aynı olmalı diye varsayıyoruz)
-    # Ancak burada eğitimdeki sırayı bilmiyoruz. Genelde sort edilerek eğitilir.
+    # Haritadaki şehirleri al
     sorted_nodes = sorted(list(G.nodes))
     node_to_idx = {node: i for i, node in enumerate(sorted_nodes)}
-    
     start_idx = node_to_idx[start_node]
     end_idx = node_to_idx[end_node]
     
-    # Feature hesaplama
-    num_nodes = len(sorted_nodes)
+    # --- CRITICAL FIX: GCNConv Crash Önleme ---
+    # x (feature matrix) boyutunu HARİTA BOYUTUNA (81) göre ayarla
+    num_nodes_actual = len(sorted_nodes)
     
-    # NetworkX metrikleri (Tensör boyutu modelin beklentisine eşitlenmeli)
-    # Eğer model 81 node ise, bizim 81 satırlık feature matrisimiz olmalı.
-    
-    degree = np.zeros((model_node_count, 1))
-    centrality = np.zeros((model_node_count, 1))
-    clustering = np.zeros((model_node_count, 1))
-    pagerank = np.zeros((model_node_count, 1))
-    
-    # Mevcut grafın değerlerini doldur
-    current_degrees = np.array([val for (node, val) in G.degree()])
-    # (Burada basitleştirme yapıyoruz, gerçek featurelar eğitim verisiyle birebir aynı sırada olmalı)
-    # Şimdilik dummy feature ile yapıyı kuralım, model zaten topolojiyi öğrendi.
+    # Feature hesaplama (Dummy, çünkü GNN topolojiyi öğrendi)
+    # Boyut: [81, 4]
+    base_features = torch.zeros(num_nodes_actual, 4) 
     
     # Maskeler
-    start_mask = torch.zeros(model_node_count, 1)
-    end_mask = torch.zeros(model_node_count, 1)
+    start_mask = torch.zeros(num_nodes_actual, 1)
+    end_mask = torch.zeros(num_nodes_actual, 1)
     start_mask[start_idx] = 1
     end_mask[end_idx] = 1
     
-    # Dummy Features (Eğitimdeki gibi kompleks hesaplamaya gerek yok, GNN yapıyı biliyor)
-    base_features = torch.zeros(model_node_count, 4) 
-    
+    # x matrisi: [81, 6] (RuntimeError'ı çözen yer burası)
     x = torch.cat([base_features, start_mask, end_mask], dim=1)
     
-    # Edge Index (Node isimlerini indexlere çevir)
+    # Edge Index (81 düğüm üzerinden)
     edges = []
     for u, v in G.edges():
         if u in node_to_idx and v in node_to_idx:
@@ -256,30 +244,42 @@ def run_ai_inference(model, G, start_node, end_node, model_node_count):
     path_indices = [start_idx]
     
     with torch.no_grad():
+        # Encoder (GCNConv): Input [81, 6] -> Output [81, 40] (Eğer model 40 node ile eğitildiyse)
         node_emb = model.encoder(x, edge_index)
+        
+        # Decoder (LSTM)
         input_emb = node_emb[start_idx].unsqueeze(0).unsqueeze(0)
         hidden = None
         curr = start_idx
         
-        for _ in range(50): # Max adım
+        for _ in range(50):
             out, hidden = model.decoder.lstm(input_emb, hidden)
+            # Logits boyutu: [1, 40] (Modelin kelime dağarcığı)
             logits = model.decoder.fc_out(out.squeeze(1))
             
-            # Maskeleme (Sadece komşulara git)
+            # Maskeleme: Sadece geçerli komşulara git
             curr_node_name = sorted_nodes[curr]
             neighbors = list(G.neighbors(curr_node_name))
-            neighbor_indices = [node_to_idx[n] for n in neighbors]
             
+            # Modelin tahmin edebileceği index sınırları içinde kalan komşuları filtrele
+            # Eğer model 40 node biliyorsa, index > 39 olan komşulara GİDEMEZ.
+            model_vocab_size = logits.size(1)
+            valid_neighbors = [n for n in neighbors if node_to_idx[n] < model_vocab_size]
+            neighbor_indices = [node_to_idx[n] for n in valid_neighbors]
+            
+            # Eğer gidecek geçerli bir komşu yoksa (hepsi model sınırının dışındaysa) dur.
+            if not neighbor_indices:
+                break
+
             # Logits maskeleme
             full_mask = torch.ones_like(logits) * -float('inf')
-            # Geçerli komşular ve kendisi (veya hedef)
-            valid_indices = torch.tensor(neighbor_indices, dtype=torch.long)
+            valid_indices_tensor = torch.tensor(neighbor_indices, dtype=torch.long)
             
-            if len(valid_indices) > 0:
-                full_mask[0, valid_indices] = logits[0, valid_indices]
+            if len(valid_indices_tensor) > 0:
+                full_mask[0, valid_indices_tensor] = logits[0, valid_indices_tensor]
                 pred_idx = full_mask.argmax(dim=-1).item()
                 
-                if pred_idx == curr: break # İlerleme yoksa dur
+                if pred_idx == curr: break 
                 
                 path_indices.append(pred_idx)
                 curr = pred_idx
@@ -290,8 +290,6 @@ def run_ai_inference(model, G, start_node, end_node, model_node_count):
                 break
                 
     t_end = time.perf_counter()
-    
-    # İndeksleri Şehir İsimlerine Çevir
     final_path = [sorted_nodes[i] for i in path_indices]
     return (t_end - t_start) * 1000, final_path
 
@@ -336,8 +334,8 @@ with st.sidebar:
     st.markdown("---")
     
     col1, col2 = st.columns(2)
-    start_city = col1.selectbox("Başlangıç", sorted_cities, index=34) # İstanbul civarı
-    end_city = col2.selectbox("Hedef", sorted_cities, index=6) # Ankara civarı
+    start_city = col1.selectbox("Başlangıç", sorted_cities, index=0) # Adana
+    end_city = col2.selectbox("Hedef", sorted_cities, index=6) # Ankara
     
     st.markdown("### Algoritma Seçimi")
     view_option = st.radio("Görünüm:", ["Karşılaştırmalı (Hepsi)", "Tekil Analiz"])
@@ -371,16 +369,17 @@ if 'run' in st.session_state and st.session_state['run']:
     
     # 4. Yapay Zeka
     if ai_model:
+        # Eğer model küçükse kullanıcıyı uyar
+        if ai_node_count < len(G.nodes):
+            st.warning(f"⚠️ Model kapasitesi ({ai_node_count} şehir), harita boyutundan ({len(G.nodes)} şehir) küçük. Model sadece ilk {ai_node_count} şehri kullanabilir.", icon="⚠️")
+            
         ai_time, ai_path = run_ai_inference(ai_model, G, start_city, end_city, ai_node_count)
-        # AI Maliyeti (Doğruluk kontrolü için graf üzerinden hesapla)
+        
         ai_real_cost = 0
-        valid_path = True
         if len(ai_path) > 1:
             for i in range(len(ai_path)-1):
                 if G.has_edge(ai_path[i], ai_path[i+1]):
                     ai_real_cost += G[ai_path[i]][ai_path[i+1]]['weight']
-                else:
-                    valid_path = False
         
         results.append({"Algoritma": "Yapay Zeka (GNN)", "Süre (ms)": ai_time, "Maliyet": ai_real_cost, "Yol": ai_path})
 
@@ -396,26 +395,21 @@ if 'run' in st.session_state and st.session_state['run']:
         fig.patch.set_facecolor(COLOR_BG_LIGHT)
         ax.set_facecolor(COLOR_BG_LIGHT)
         
-        # Harita Çizimi
         nx.draw_networkx_nodes(G, pos, node_size=100, node_color=COLOR_NODE_BRIGHT, ax=ax)
         nx.draw_networkx_edges(G, pos, edge_color=COLOR_EDGE_LIGHT, alpha=0.5, ax=ax)
         nx.draw_networkx_labels(G, pos, font_size=8, font_color='black', ax=ax)
         
-        # Rotaları Çiz
         path_width = 4
         
-        # Dijkstra (Mavi)
         if d_path:
             edges = list(zip(d_path, d_path[1:]))
             nx.draw_networkx_edges(G, pos, edgelist=edges, edge_color=COLOR_SIDEBAR_BG, width=path_width+2, label="Dijkstra", ax=ax)
             
-        # AI (Turkuaz)
         ai_res = next((r for r in results if r["Algoritma"] == "Yapay Zeka (GNN)"), None)
         if ai_res and ai_res["Yol"]:
             edges = list(zip(ai_res["Yol"], ai_res["Yol"][1:]))
             nx.draw_networkx_edges(G, pos, edgelist=edges, edge_color=COLOR_AI_CYAN, width=path_width, style='solid', label="Yapay Zeka", ax=ax)
 
-        # Başlangıç/Bitiş
         nx.draw_networkx_nodes(G, pos, nodelist=[start_city], node_color="green", node_size=300, ax=ax)
         nx.draw_networkx_nodes(G, pos, nodelist=[end_city], node_color="red", node_size=300, ax=ax)
         
@@ -423,7 +417,6 @@ if 'run' in st.session_state and st.session_state['run']:
         st.pyplot(fig, use_container_width=True)
         st.markdown('</div>', unsafe_allow_html=True)
 
-    # --- ANALİZ TABLOSU ---
     col1, col2 = st.columns([1, 1])
     with col1:
         st.markdown("### 📊 Sonuçlar")
