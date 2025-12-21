@@ -8,7 +8,7 @@ from torch_geometric.nn import GCNConv
 from torch_geometric.data import Data
 
 # -----------------------------------------------------------------------------
-# 1. MODEL SINIFLARI (Eğitim kodunuzla birebir aynı olmalı)
+# 1. MODEL SINIFLARI (Aynı kalmalı)
 # -----------------------------------------------------------------------------
 
 class Encoder(nn.Module):
@@ -40,53 +40,49 @@ class Decoder(nn.Module):
 class GNNPathModel(nn.Module):
     def __init__(self, in_channels, hidden_channels, out_channels, num_nodes, max_path_len):
         super().__init__()
-        # LSTM Hidden Dim sabit olarak eğitim kodundan alındı
         lstm_hidden_dim = 512 
         self.encoder = Encoder(in_channels, hidden_channels, num_nodes)
         self.decoder = Decoder(num_nodes, lstm_hidden_dim, num_nodes)
 
 # -----------------------------------------------------------------------------
-# 2. YARDIMCI FONKSİYONLAR
+# 2. YARDIMCI VE KRİTİK DÜZELTME FONKSİYONLARI
 # -----------------------------------------------------------------------------
 
 @st.cache_resource
 def load_model(model_path):
     try:
-        # Önce state_dict yükleyip boyutları analiz edelim
         state_dict = torch.load(model_path, map_location=torch.device('cpu'))
-        
-        # Modelin eğitildiği output layer boyutunu bul (num_nodes)
         weight_shape = state_dict['decoder.fc_out.weight'].shape
-        num_nodes_trained = weight_shape[0]  # Output dim (e.g., 82)
+        num_nodes_trained = weight_shape[0]
         
-        # Hyperparametreler (Eğitim kodunuzdaki varsayılanlar)
         hidden_channels = 256
-        in_channels = 6  # 4 features + 2 masks
+        in_channels = 6
         out_channels = num_nodes_trained
-        max_path_len = 100 # Sembolik, mimariyi etkilemez
+        max_path_len = 100
         
         model = GNNPathModel(in_channels, hidden_channels, out_channels, num_nodes_trained, max_path_len)
         model.load_state_dict(state_dict)
         model.eval()
         return model, num_nodes_trained
     except Exception as e:
-        st.error(f"Model yüklenirken hata oluştu: {e}")
+        st.error(f"Model yüklenirken hata: {e}")
         return None, 0
 
-def get_graph_features(G, num_nodes_trained):
-    """
-    Eğitim verisindeki feature extraction mantığını uygular.
-    """
-    # Gerekirse düğüm sayısını eşitlemek için padding yapılabilir ama
-    # burada sadece mevcut grafın özelliklerini alacağız.
-    
-    # Featurelar: Degree, Centrality, Clustering, PageRank
+def get_graph_features(G):
+    # Düğüm featurelarını hesapla
+    # G küçükse veya büyükse fark etmez, önce ham değerleri alalım
     degree = np.array([val for (node, val) in G.degree()])
-    centrality = np.array([val for (node, val) in nx.betweenness_centrality(G).items()])
-    clustering = np.array([val for (node, val) in nx.clustering(G).items()])
-    pagerank = np.array([val for (node, val) in nx.pagerank(G).items()])
+    try:
+        centrality = np.array([val for (node, val) in nx.betweenness_centrality(G).items()])
+        clustering = np.array([val for (node, val) in nx.clustering(G).items()])
+        pagerank = np.array([val for (node, val) in nx.pagerank(G).items()])
+    except:
+        # Hata durumunda (örn: graph bağlantısızsa) default değerler
+        nodes_len = len(G.nodes())
+        centrality = np.zeros(nodes_len)
+        clustering = np.zeros(nodes_len)
+        pagerank = np.zeros(nodes_len)
 
-    # Reshape
     degree = degree.reshape(-1, 1)
     centrality = centrality.reshape(-1, 1)
     clustering = clustering.reshape(-1, 1)
@@ -95,96 +91,108 @@ def get_graph_features(G, num_nodes_trained):
     base_features = np.concatenate([degree, centrality, clustering, pagerank], axis=1)
     return torch.tensor(base_features, dtype=torch.float)
 
-def safe_mask_logits(logits, allowed_indices):
-    all_indices = set(range(logits.shape[-1]))
-    mask_indices = torch.tensor(list(all_indices - set(allowed_indices)), dtype=torch.long)
-    logits = logits.clone()
-    if logits.dim() == 2:
-        logits[0, mask_indices] = -float('inf')
-    else:
-        logits[mask_indices] = -float('inf')
-    return logits
-
-def get_neighbors(edge_index, num_nodes):
-    neighbors = [[] for _ in range(num_nodes)]
-    for i in range(edge_index.size(1)):
-        src, dst = edge_index[:, i]
-        neighbors[src.item()].append(dst.item())
-        neighbors[dst.item()].append(src.item()) # Undirected
-    return neighbors
-
-def run_ai_inference(model, G, start_node, end_node, num_nodes_trained):
+def run_ai_inference_strict(model, G, start_node, end_node, num_nodes_trained):
     """
-    Eğitilmiş modeli kullanarak yol tahmini yapar.
+    Bu fonksiyon modelin SADECE geçerli komşulara gitmesini zorlar.
     """
-    # 1. Grafı PyG formatına çevir
+    # 1. Grafı Tensor'a çevir
     adj = nx.to_numpy_array(G)
     edge_index = []
-    edge_attr = [] # Ağırlıklar (model kullanıyorsa)
     
-    for i in range(len(adj)):
-        for j in range(len(adj)):
+    # NetworkX grafındaki node sayısını al
+    current_num_nodes = len(G.nodes())
+
+    for i in range(current_num_nodes):
+        for j in range(current_num_nodes):
             if adj[i][j] != 0:
                 edge_index.append([i, j])
-                edge_attr.append([adj[i][j]])
     
-    edge_index = torch.tensor(edge_index, dtype=torch.long).t().contiguous()
-    edge_attr = torch.tensor(edge_attr, dtype=torch.float)
+    if not edge_index: # Eğer hiç kenar yoksa
+        return [start_node]
 
-    # 2. Featureları hazırla
-    base_features = get_graph_features(G, num_nodes_trained)
+    edge_index = torch.tensor(edge_index, dtype=torch.long).t().contiguous()
     
-    # Eğer oluşturulan graf modelin eğitim grafından küçükse, featureları pad etmeliyiz
-    # Çünkü Linear katmanlar sabit boyut bekler.
-    current_nodes = base_features.shape[0]
-    if current_nodes < num_nodes_trained:
-        pad_size = num_nodes_trained - current_nodes
-        padding = torch.zeros(pad_size, 4)
+    # 2. Featureları Hazırla ve Padding Yap
+    base_features = get_graph_features(G)
+    
+    # Model sabit boyutta feature bekler (num_nodes_trained).
+    # Eğer şu anki graf küçükse, feature matrisini 0 ile doldur (padding).
+    if current_num_nodes < num_nodes_trained:
+        pad_size = num_nodes_trained - current_num_nodes
+        padding = torch.zeros(pad_size, 4) # 4 temel feature
+        # DİKKAT: Featureları pad ediyoruz
         base_features = torch.cat([base_features, padding], dim=0)
     
-    # Masklar
+    # 3. Maskları Hazırla
     start_mask = torch.zeros(num_nodes_trained, 1)
     end_mask = torch.zeros(num_nodes_trained, 1)
-    start_mask[start_node] = 1
-    end_mask[end_node] = 1
+    
+    # Eğer seçilen node indexi model boyutundan büyükse hata vermemesi için kontrol (genelde olmaz ama tedbir)
+    if start_node < num_nodes_trained: start_mask[start_node] = 1
+    if end_node < num_nodes_trained: end_mask[end_node] = 1
     
     x = torch.cat([base_features, start_mask, end_mask], dim=1)
     
-    # 3. Model Tahmini
-    path = [start_node]
-    visited = set([start_node])
+    # 4. Encoder Çalıştır
+    # edge_index'i de modele vermeden önce kontrol etmeliyiz ama 
+    # model yapısı gereği edge_index sadece node embedding için kullanılır.
+    # Modelin fc katmanı feature boyutuna bağlıdır. 
+    # Burada GCNConv kullanıldığı için edge_index'in boyutu dinamiktir, sorun çıkarmaz.
     
     with torch.no_grad():
-        node_emb = model.encoder(x, edge_index, edge_attr) # edge_attr opsiyonel, modelde varsa kullanılır
-        neighbors = get_neighbors(edge_index, num_nodes_trained)
+        node_emb = model.encoder(x, edge_index)
         
+        # LSTM Başlangıç
         input_emb = node_emb[start_node].unsqueeze(0).unsqueeze(0)
         hidden = None
+        
+        path = [start_node]
+        visited = set([start_node])
         curr_idx = start_node
         
-        for _ in range(num_nodes_trained): # Max adım sayısı
+        # Maksimum adım sayısı (infinite loop koruması)
+        max_steps = current_num_nodes * 2 
+        
+        for _ in range(max_steps):
             out, hidden = model.decoder.lstm(input_emb, hidden)
             logits = model.decoder.fc_out(out.squeeze(1))
             
-            # Masking (Gidilebilecek komşular)
-            # Dikkat: Rastgele grafın komşuları, eğitim grafının indekslerinden farklıdır.
-            # Ancak model topolojiyi GCN ile öğrendiği için node_emb üzerinden karar verir.
+            # --- KRİTİK BÖLÜM: MASKING ---
+            # Modelin tüm çıktıları arasından SADECE şu anki düğümün komşularını seçmesine izin ver.
             
-            current_neighbors = []
-            if curr_idx < len(neighbors):
-                current_neighbors = neighbors[curr_idx]
+            # 1. Mevcut graf üzerindeki komşuları bul
+            neighbors = list(G.neighbors(curr_idx))
             
-            allowed = set(current_neighbors) - visited
+            # 2. Ziyaret edilmemiş komşuları belirle
+            unvisited_neighbors = [n for n in neighbors if n not in visited]
             
-            # Eğer hedef komşudaysa oraya gitmeye zorla/izin ver
-            if end_node in current_neighbors:
-                allowed.add(end_node)
-            
-            if not allowed:
+            # 3. Eğer hedef düğüm komşular arasındaysa, direkt oraya git (Greedy finish)
+            if end_node in neighbors:
+                path.append(end_node)
                 break
                 
-            logits = safe_mask_logits(logits, allowed)
-            pred_node = logits.argmax(dim=-1).item()
+            # 4. Gidilecek yer kalmadıysa (Dead end)
+            valid_candidates = unvisited_neighbors if unvisited_neighbors else neighbors # Ziyaret edilmemiş yoksa, geri dönmeye izin ver
+            
+            if not valid_candidates:
+                break # Çıkmaz sokak
+            
+            # 5. Logits maskeleme
+            # Tüm değerleri -sonsuz yap
+            masked_logits = torch.full_like(logits, -float('inf'))
+            
+            # Sadece geçerli adayların indekslerini orijinal logit değerleriyle doldur
+            # DİKKAT: Modelin output boyutu (81) ile mevcut graf boyutu (örn 20) farklı olabilir.
+            # Sadece modelin tanıdığı indeks aralığındakileri alabiliriz.
+            safe_candidates = [c for c in valid_candidates if c < num_nodes_trained]
+            
+            if not safe_candidates:
+                break
+                
+            masked_logits[0, safe_candidates] = logits[0, safe_candidates]
+            
+            # 6. En yüksek olasılıklı komşuyu seç
+            pred_node = masked_logits.argmax(dim=-1).item()
             
             path.append(pred_node)
             visited.add(pred_node)
@@ -201,147 +209,139 @@ def run_ai_inference(model, G, start_node, end_node, num_nodes_trained):
 # 3. STREAMLIT ARAYÜZÜ
 # -----------------------------------------------------------------------------
 
-st.set_page_config(page_title="AI vs Algorithms: Pathfinding", layout="wide")
-st.title("🗺️ AI Destekli Yol Bulma Algoritmaları Karşılaştırması")
+st.set_page_config(page_title="AI Pathfinding", layout="wide")
+st.title("🤖 AI vs Algoritmalar: Yol Bulma Simülasyonu")
 
-# Sidebar - Ayarlar
-st.sidebar.header("Harita Ayarları")
-
-# Model Yükleme
-model_path = "Model3_2.pt" # Github reponuzda bu dosya aynı dizinde olmalı
+# Sidebar
+st.sidebar.header("Ayarlar")
+model_path = "Model3_2.pt"
 model, max_trained_nodes = load_model(model_path)
 
-if model:
-    st.sidebar.success(f"Model Yüklendi! (Maksimum Node Kapasitesi: {max_trained_nodes})")
-else:
-    st.sidebar.error("Model dosyası (Model3_2.pt) bulunamadı.")
+if not model:
+    st.error("Model dosyası bulunamadı.")
     st.stop()
 
-# Harita Parametreleri
-num_nodes = st.sidebar.slider("Düğüm Sayısı (Node Count)", min_value=5, max_value=max_trained_nodes, value=20)
-edge_prob = st.sidebar.slider("Bağlantı Olasılığı (Edge Probability)", 0.1, 1.0, 0.3)
-min_weight = st.sidebar.number_input("Min Edge Ağırlığı", 1, 10, 1)
-max_weight = st.sidebar.number_input("Max Edge Ağırlığı", 10, 100, 20)
+st.sidebar.info(f"Yüklü Model Kapasitesi: {max_trained_nodes} Node")
 
-if st.sidebar.button("Yeni Harita Oluştur"):
-    # Rastgele Graf Oluşturma
-    # Connected olması için döngü
-    connected = False
-    while not connected:
-        G = nx.erdos_renyi_graph(n=num_nodes, p=edge_prob, seed=None)
-        if nx.is_connected(G):
-            connected = True
+# Harita Ayarları
+# Kullanıcı modelin kapasitesinden fazla node seçerse hata alır, o yüzden max değeri sınırlıyoruz.
+num_nodes = st.sidebar.slider("Düğüm Sayısı", 5, max_trained_nodes, 15)
+edge_prob = st.sidebar.slider("Bağlantı Sıklığı", 0.1, 1.0, 0.25)
+seed = st.sidebar.number_input("Rastgelelik Tohumu (Seed)", 1, 1000, 42)
+
+if st.sidebar.button("Harita Oluştur / Yenile"):
+    # Rastgele Graf
+    G = nx.erdos_renyi_graph(n=num_nodes, p=edge_prob, seed=seed)
     
-    # Ağırlık atama
+    # İzole düğümleri bağla (Graph connected olsun)
+    if not nx.is_connected(G):
+        components = list(nx.connected_components(G))
+        for i in range(len(components)-1):
+            # Her bileşenden bir düğümü diğerine bağla
+            u = list(components[i])[0]
+            v = list(components[i+1])[0]
+            G.add_edge(u, v)
+
+    # Ağırlık ata
+    np.random.seed(seed)
     for (u, v) in G.edges():
-        G.edges[u, v]['weight'] = np.random.randint(min_weight, max_weight + 1)
-    
-    # Layout belirle ve kaydet (Görsel tutarlılık için)
-    pos = nx.spring_layout(G, seed=42)
+        G.edges[u, v]['weight'] = np.random.randint(1, 20)
+        
+    pos = nx.spring_layout(G, seed=seed)
     st.session_state['G'] = G
     st.session_state['pos'] = pos
-    st.session_state['map_generated'] = True
+    st.session_state['map_ready'] = True
 
-# Harita varsa işlem yap
-if 'map_generated' in st.session_state and st.session_state['map_generated']:
+if 'map_ready' in st.session_state:
     G = st.session_state['G']
     pos = st.session_state['pos']
     
     col1, col2 = st.columns([1, 3])
     
     with col1:
-        st.subheader("Yol Seçimi")
+        st.subheader("Rota Belirle")
         nodes = list(G.nodes())
-        start_node = st.selectbox("Başlangıç (Start)", nodes, index=0)
-        end_node = st.selectbox("Bitiş (End)", nodes, index=len(nodes)-1)
+        start_node = st.selectbox("Başlangıç", nodes, index=0)
+        end_node = st.selectbox("Bitiş", nodes, index=len(nodes)-1)
         
-        run_btn = st.button("Algoritmaları Çalıştır")
-
-    with col2:
-        # Haritayı Çiz (Temiz Hal)
-        fig, ax = plt.subplots(figsize=(10, 6))
-        nx.draw(G, pos, ax=ax, with_labels=True, node_color='lightgray', edge_color='gray', node_size=500)
-        edge_labels = nx.get_edge_attributes(G, 'weight')
-        nx.draw_networkx_edge_labels(G, pos, edge_labels=edge_labels, font_size=8)
-        
-        if run_btn:
+        if st.button("Başlat"):
             results = []
             
-            # 1. Dijkstra
+            # --- 1. Klasik Algoritmalar ---
             try:
-                dijkstra_path = nx.dijkstra_path(G, start_node, end_node, weight='weight')
-                dijkstra_len = nx.dijkstra_path_length(G, start_node, end_node, weight='weight')
-                results.append(("Dijkstra", dijkstra_path, dijkstra_len, 'red', 'solid'))
-            except nx.NetworkXNoPath:
-                st.warning("Dijkstra yol bulamadı.")
+                path = nx.dijkstra_path(G, start_node, end_node, weight='weight')
+                dist = nx.dijkstra_path_length(G, start_node, end_node, weight='weight')
+                results.append(("Dijkstra (Optimal)", path, dist, 'red', 'solid'))
+            except:
+                results.append(("Dijkstra", [], float('inf'), 'red', 'solid'))
 
-            # 2. A* (Heuristic = 0, Dijkstra gibi davranır ama yapı olarak A*)
             try:
-                astar_path = nx.astar_path(G, start_node, end_node, weight='weight')
-                # A* için maliyet hesapla
-                astar_len = sum(G[u][v]['weight'] for u, v in zip(astar_path[:-1], astar_path[1:]))
-                results.append(("A*", astar_path, astar_len, 'blue', 'dashed'))
-            except nx.NetworkXNoPath:
-                pass
+                path = nx.astar_path(G, start_node, end_node, weight='weight')
+                dist = sum(G[u][v]['weight'] for u, v in zip(path[:-1], path[1:]))
+                results.append(("A*", path, dist, 'blue', 'dashed'))
+            except: pass
 
-            # 3. Bellman-Ford
             try:
-                bellman_path = nx.bellman_ford_path(G, start_node, end_node, weight='weight')
-                bellman_len = sum(G[u][v]['weight'] for u, v in zip(bellman_path[:-1], bellman_path[1:]))
-                results.append(("Bellman-Ford", bellman_path, bellman_len, 'purple', 'dotted'))
-            except nx.NetworkXNoPath:
-                pass
+                path = nx.bellman_ford_path(G, start_node, end_node, weight='weight')
+                dist = sum(G[u][v]['weight'] for u, v in zip(path[:-1], path[1:]))
+                results.append(("Bellman-Ford", path, dist, 'purple', 'dotted'))
+            except: pass
 
-            # 4. AI Model
+            # --- 2. AI Model ---
             try:
-                ai_path = run_ai_inference(model, G, start_node, end_node, max_trained_nodes)
-                # AI yol maliyeti (Eğer geçerli bir yol ise)
-                ai_len = 0
-                valid_ai_path = True
+                ai_path = run_ai_inference_strict(model, G, start_node, end_node, max_trained_nodes)
+                
+                # AI yol maliyeti hesapla
+                ai_dist = 0
+                is_valid = True
+                if len(ai_path) < 2 or ai_path[-1] != end_node:
+                    is_valid = False
+                
                 for u, v in zip(ai_path[:-1], ai_path[1:]):
                     if G.has_edge(u, v):
-                        ai_len += G[u][v]['weight']
+                        ai_dist += G[u][v]['weight']
                     else:
-                        valid_ai_path = False
-                        ai_len = float('inf')
+                        is_valid = False
+                        ai_dist = float('inf')
                 
-                label = "AI Model" + (" (Geçersiz Yol)" if not valid_ai_path else "")
-                results.append((label, ai_path, ai_len, 'green', 'dashdot'))
+                label = "Yapay Zeka"
+                if not is_valid: label += " (Hedefe Ulaşamadı)"
+                
+                results.append((label, ai_path, ai_dist, 'green', 'dashdot'))
+                
             except Exception as e:
-                st.error(f"AI Model hatası: {e}")
+                st.error(f"AI Hatası: {e}")
 
-            # Sonuçları Görselleştir
-            offset = 0
-            st.write("### Sonuçlar")
-            res_col1, res_col2, res_col3, res_col4 = st.columns(4)
+            # --- Görselleştirme ---
+            fig, ax = plt.subplots(figsize=(10, 6))
+            nx.draw(G, pos, ax=ax, with_labels=True, node_color='lightgray', edge_color='#cccccc', node_size=600)
+            edge_labels = nx.get_edge_attributes(G, 'weight')
+            nx.draw_networkx_edge_labels(G, pos, edge_labels=edge_labels, font_size=7)
+
+            st.write("### Sonuçlar Tablosu")
             
-            cols = [res_col1, res_col2, res_col3, res_col4]
-            
-            for idx, (name, path, length, color, style) in enumerate(results):
-                # Metrikleri yaz
-                cols[idx].metric(label=name, value=f"{length}", delta=f"Adım: {len(path)}")
+            cols = st.columns(len(results))
+            for idx, (name, path, dist, color, style) in enumerate(results):
+                # Tablo
+                val_str = f"{dist}" if dist != float('inf') else "Başarısız"
+                cols[idx].metric(name, val_str, f"{len(path)-1} Adım")
                 
-                # Yolu çiz
-                path_edges = list(zip(path[:-1], path[1:]))
-                # Çizgileri üst üste binmemesi için hafif kaydırarak (width ve alpha ile) çiziyoruz
-                nx.draw_networkx_edges(G, pos, edgelist=path_edges, edge_color=color, width=4-(idx*0.5), style=style, label=name)
+                # Çizim
+                if len(path) > 1:
+                    edges = list(zip(path[:-1], path[1:]))
+                    # Çakışmayı önlemek için her çizgiyi biraz kaydır (offset) veya kalınlığı değiştir
+                    width = 6 - (idx * 1.5)
+                    alpha = 0.8 - (idx * 0.1)
+                    nx.draw_networkx_edges(G, pos, edgelist=edges, edge_color=color, width=width, style=style, alpha=alpha, label=name)
             
-            plt.title(f"Yol Karşılaştırması: {start_node} -> {end_node}")
-            
-            # Legend oluşturma (Manuel handle ile)
+            # Legend
             from matplotlib.lines import Line2D
             custom_lines = [Line2D([0], [0], color=r[3], lw=2, linestyle=r[4]) for r in results]
-            ax.legend(custom_lines, [r[0] for r in results])
+            ax.legend(custom_lines, [r[0] for r in results], loc='upper left')
             
             st.pyplot(fig)
-            
-            # Detaylı Yol Listesi
-            with st.expander("Detaylı Yol Listesi"):
-                for name, path, length, _, _ in results:
-                    st.write(f"**{name}:** {path} (Maliyet: {length})")
 
-        else:
-            st.pyplot(fig)
-
-else:
-    st.info("Lütfen sol menüden 'Yeni Harita Oluştur' butonuna basın.")
+    with col2:
+        # Harita önizleme (Boş halini göstermek için)
+        if 'map_ready' in st.session_state and not st.button("Sonuçları Temizle", key="clean"):
+            pass
