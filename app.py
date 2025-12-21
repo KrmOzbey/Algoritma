@@ -214,7 +214,7 @@ st.title("🤖 AI vs Algoritmalar: Yol Bulma Simülasyonu")
 
 # Sidebar
 st.sidebar.header("Ayarlar")
-model_path = "Model3_2.pt"
+model_path = "Model3_3.pt"
 model, max_trained_nodes = load_model(model_path)
 
 if not model:
