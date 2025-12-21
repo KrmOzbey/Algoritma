@@ -1,347 +1,384 @@
 import streamlit as st
-import torch
-import torch.nn as nn
 import networkx as nx
-import numpy as np
 import matplotlib.pyplot as plt
-from torch_geometric.nn import GCNConv
-from torch_geometric.data import Data
+import pandas as pd
+import random
+import math
+import heapq
+import time
+import altair as alt
 
-# -----------------------------------------------------------------------------
-# 1. MODEL SINIFLARI (Aynı kalmalı)
-# -----------------------------------------------------------------------------
+# --- 1. SAYFA VE STİL AYARLARI ---
+st.set_page_config(
+    page_title="Algoritma Simülasyonu",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
 
-class Encoder(nn.Module):
-    def __init__(self, in_channels, hidden_channels, out_channels, dropout_p=0.2):
-        super().__init__()
-        self.gcn1 = GCNConv(in_channels, hidden_channels)
-        self.bn1 = nn.BatchNorm1d(hidden_channels)
-        self.gcn2 = GCNConv(hidden_channels, hidden_channels)
-        self.bn2 = nn.BatchNorm1d(hidden_channels)
-        self.dropout = nn.Dropout(dropout_p)
-        self.fc = nn.Linear(hidden_channels, out_channels)
+# --- RENK PALETİ ---
+COLOR_BG_LIGHT = "#E3F2FD"      # Ana Arka Plan
+COLOR_SIDEBAR_BG = "#154360"    # Sidebar Arka Planı
+COLOR_TEXT_MAIN = "#000000"     # Ana Ekran Yazıları
+# YENİ: Sidebar için özel gri tonu
+COLOR_SIDEBAR_TEXT_GRAY = "#B0BEC5"  # Sidebar Yazıları (Okunaklı Gri)
+COLOR_ACCENT_RED = "#C0392B"    # Kırmızı Vurgular
+COLOR_NODE_BRIGHT = "#3498DB"   # Düğüm Rengi
+COLOR_EDGE_LIGHT = "#CFD8DC"    # Kenar Rengi
+COLOR_CHART_TEXT = "#546E7A"    # Ana Ekran Grafik Yazıları (Koyu Gri)
 
-    def forward(self, x, edge_index, edge_attr=None):
-        x = self.gcn1(x, edge_index)
-        x = torch.relu(self.bn1(x))
-        x = self.dropout(x)
-        x = self.gcn2(x, edge_index)
-        x = torch.relu(self.bn2(x))
-        x = self.dropout(x)
-        x = self.fc(x)
-        return x
-
-class Decoder(nn.Module):
-    def __init__(self, node_dim, hidden_dim, out_dim):
-        super().__init__()
-        self.lstm = nn.LSTM(node_dim, hidden_dim, batch_first=True)
-        self.fc_out = nn.Linear(hidden_dim, out_dim)
-
-class GNNPathModel(nn.Module):
-    def __init__(self, in_channels, hidden_channels, out_channels, num_nodes, max_path_len):
-        super().__init__()
-        lstm_hidden_dim = 512 
-        self.encoder = Encoder(in_channels, hidden_channels, num_nodes)
-        self.decoder = Decoder(num_nodes, lstm_hidden_dim, num_nodes)
-
-# -----------------------------------------------------------------------------
-# 2. YARDIMCI VE KRİTİK DÜZELTME FONKSİYONLARI
-# -----------------------------------------------------------------------------
-
-@st.cache_resource
-def load_model(model_path):
-    try:
-        state_dict = torch.load(model_path, map_location=torch.device('cpu'))
-        weight_shape = state_dict['decoder.fc_out.weight'].shape
-        num_nodes_trained = weight_shape[0]
+# Özel CSS
+st.markdown(f"""
+    <style>
+        /* 1. Genel Sayfa Arka Planı */
+        .stApp {{
+            background-color: {COLOR_BG_LIGHT};
+        }}
         
-        hidden_channels = 256
-        in_channels = 6
-        out_channels = num_nodes_trained
-        max_path_len = 100
+        /* 2. ANA EKRAN YAZILARI (SİYAH) */
+        h1, h2, h3, h4, h5, p, span, li {{
+            color: {COLOR_TEXT_MAIN} !important;
+            font-family: 'Segoe UI', sans-serif;
+        }}
         
-        model = GNNPathModel(in_channels, hidden_channels, out_channels, num_nodes_trained, max_path_len)
-        model.load_state_dict(state_dict)
-        model.eval()
-        return model, num_nodes_trained
-    except Exception as e:
-        st.error(f"Model yüklenirken hata: {e}")
-        return None, 0
-
-def get_graph_features(G):
-    # Düğüm featurelarını hesapla
-    # G küçükse veya büyükse fark etmez, önce ham değerleri alalım
-    degree = np.array([val for (node, val) in G.degree()])
-    try:
-        centrality = np.array([val for (node, val) in nx.betweenness_centrality(G).items()])
-        clustering = np.array([val for (node, val) in nx.clustering(G).items()])
-        pagerank = np.array([val for (node, val) in nx.pagerank(G).items()])
-    except:
-        # Hata durumunda (örn: graph bağlantısızsa) default değerler
-        nodes_len = len(G.nodes())
-        centrality = np.zeros(nodes_len)
-        clustering = np.zeros(nodes_len)
-        pagerank = np.zeros(nodes_len)
-
-    degree = degree.reshape(-1, 1)
-    centrality = centrality.reshape(-1, 1)
-    clustering = clustering.reshape(-1, 1)
-    pagerank = pagerank.reshape(-1, 1)
-
-    base_features = np.concatenate([degree, centrality, clustering, pagerank], axis=1)
-    return torch.tensor(base_features, dtype=torch.float)
-
-def run_ai_inference_strict(model, G, start_node, end_node, num_nodes_trained):
-    """
-    Bu fonksiyon modelin SADECE geçerli komşulara gitmesini zorlar.
-    """
-    # 1. Grafı Tensor'a çevir
-    adj = nx.to_numpy_array(G)
-    edge_index = []
-    
-    # NetworkX grafındaki node sayısını al
-    current_num_nodes = len(G.nodes())
-
-    for i in range(current_num_nodes):
-        for j in range(current_num_nodes):
-            if adj[i][j] != 0:
-                edge_index.append([i, j])
-    
-    if not edge_index: # Eğer hiç kenar yoksa
-        return [start_node]
-
-    edge_index = torch.tensor(edge_index, dtype=torch.long).t().contiguous()
-    
-    # 2. Featureları Hazırla ve Padding Yap
-    base_features = get_graph_features(G)
-    
-    # Model sabit boyutta feature bekler (num_nodes_trained).
-    # Eğer şu anki graf küçükse, feature matrisini 0 ile doldur (padding).
-    if current_num_nodes < num_nodes_trained:
-        pad_size = num_nodes_trained - current_num_nodes
-        padding = torch.zeros(pad_size, 4) # 4 temel feature
-        # DİKKAT: Featureları pad ediyoruz
-        base_features = torch.cat([base_features, padding], dim=0)
-    
-    # 3. Maskları Hazırla
-    start_mask = torch.zeros(num_nodes_trained, 1)
-    end_mask = torch.zeros(num_nodes_trained, 1)
-    
-    # Eğer seçilen node indexi model boyutundan büyükse hata vermemesi için kontrol (genelde olmaz ama tedbir)
-    if start_node < num_nodes_trained: start_mask[start_node] = 1
-    if end_node < num_nodes_trained: end_mask[end_node] = 1
-    
-    x = torch.cat([base_features, start_mask, end_mask], dim=1)
-    
-    # 4. Encoder Çalıştır
-    # edge_index'i de modele vermeden önce kontrol etmeliyiz ama 
-    # model yapısı gereği edge_index sadece node embedding için kullanılır.
-    # Modelin fc katmanı feature boyutuna bağlıdır. 
-    # Burada GCNConv kullanıldığı için edge_index'in boyutu dinamiktir, sorun çıkarmaz.
-    
-    with torch.no_grad():
-        node_emb = model.encoder(x, edge_index)
+        /* 3. Sidebar Genel Ayarları */
+        [data-testid="stSidebar"] {{
+            background-color: {COLOR_SIDEBAR_BG};
+        }}
         
-        # LSTM Başlangıç
-        input_emb = node_emb[start_node].unsqueeze(0).unsqueeze(0)
-        hidden = None
+        /* --- SIDEBAR YAZI RENGİ DÜZENLEMESİ (GRİ YAPILDI) --- */
+        /* Sidebar'daki Başlıklar, Label'lar ve normal yazılar GRİ olsun */
+        [data-testid="stSidebar"] h1, [data-testid="stSidebar"] h2, [data-testid="stSidebar"] h3, 
+        [data-testid="stSidebar"] label, [data-testid="stSidebar"] p, [data-testid="stSidebar"] div {{
+            color: {COLOR_SIDEBAR_TEXT_GRAY} !important;
+        }}
         
-        path = [start_node]
-        visited = set([start_node])
-        curr_idx = start_node
+        /* Dropdown kutusunun içindeki seçili metin rengi */
+        [data-testid="stSidebar"] .stSelectbox div[data-baseweb="select"] div {{
+            color: {COLOR_SIDEBAR_TEXT_GRAY} !important;
+            -webkit-text-fill-color: {COLOR_SIDEBAR_TEXT_GRAY} !important;
+        }}
         
-        # Maksimum adım sayısı (infinite loop koruması)
-        max_steps = current_num_nodes * 2 
+        /* Dropdown ok simgesi rengi */
+        [data-testid="stSidebar"] .stSelectbox svg {{
+            fill: {COLOR_SIDEBAR_TEXT_GRAY} !important;
+        }}
+        /* -------------------------------------------------- */
         
-        for _ in range(max_steps):
-            out, hidden = model.decoder.lstm(input_emb, hidden)
-            logits = model.decoder.fc_out(out.squeeze(1))
-            
-            # --- KRİTİK BÖLÜM: MASKING ---
-            # Modelin tüm çıktıları arasından SADECE şu anki düğümün komşularını seçmesine izin ver.
-            
-            # 1. Mevcut graf üzerindeki komşuları bul
-            neighbors = list(G.neighbors(curr_idx))
-            
-            # 2. Ziyaret edilmemiş komşuları belirle
-            unvisited_neighbors = [n for n in neighbors if n not in visited]
-            
-            # 3. Eğer hedef düğüm komşular arasındaysa, direkt oraya git (Greedy finish)
-            if end_node in neighbors:
-                path.append(end_node)
-                break
-                
-            # 4. Gidilecek yer kalmadıysa (Dead end)
-            valid_candidates = unvisited_neighbors if unvisited_neighbors else neighbors # Ziyaret edilmemiş yoksa, geri dönmeye izin ver
-            
-            if not valid_candidates:
-                break # Çıkmaz sokak
-            
-            # 5. Logits maskeleme
-            # Tüm değerleri -sonsuz yap
-            masked_logits = torch.full_like(logits, -float('inf'))
-            
-            # Sadece geçerli adayların indekslerini orijinal logit değerleriyle doldur
-            # DİKKAT: Modelin output boyutu (81) ile mevcut graf boyutu (örn 20) farklı olabilir.
-            # Sadece modelin tanıdığı indeks aralığındakileri alabiliriz.
-            safe_candidates = [c for c in valid_candidates if c < num_nodes_trained]
-            
-            if not safe_candidates:
-                break
-                
-            masked_logits[0, safe_candidates] = logits[0, safe_candidates]
-            
-            # 6. En yüksek olasılıklı komşuyu seç
-            pred_node = masked_logits.argmax(dim=-1).item()
-            
-            path.append(pred_node)
-            visited.add(pred_node)
-            
-            if pred_node == end_node:
-                break
-            
-            curr_idx = pred_node
-            input_emb = node_emb[curr_idx].unsqueeze(0).unsqueeze(0)
-            
-    return path
+        /* 4. Buton Stili */
+        div.stButton > button {{
+            background-color: {COLOR_ACCENT_RED};
+            color: white !important;
+            border: none;
+            border-radius: 6px;
+            font-weight: bold;
+            transition: 0.3s;
+        }}
+        div.stButton > button:hover {{
+            background-color: #A93226;
+        }}
+        
+        /* 5. Expander Başlıkları (Sidebar içi) */
+        [data-testid="stSidebar"] .streamlit-expanderHeader {{
+            color: {COLOR_SIDEBAR_BG} !important; /* Başlık koyu mavi */
+            background-color: {COLOR_SIDEBAR_TEXT_GRAY}; /* Zemin gri */
+        }}
+        
+        /* Harita Konteyner (Dış Gölge Efekti) */
+        .map-container {{
+            box-shadow: 0 6px 14px rgba(0,0,0,0.2);
+            border-radius: 4px; /* Matplotlib çerçevesi ile uyum için köşe yuvarlaklığını azalttım */
+            overflow: hidden;
+            padding: 5px;
+            background-color: white; /* Çerçevenin daha net durması için beyaz zemin */
+        }}
+    </style>
+""", unsafe_allow_html=True)
 
-# -----------------------------------------------------------------------------
-# 3. STREAMLIT ARAYÜZÜ
-# -----------------------------------------------------------------------------
+# --- 2. ALGORİTMA FONKSİYONLARI ---
+def euclidean_dist(node1, node2, positions):
+    x1, y1 = positions[node1]
+    x2, y2 = positions[node2]
+    return math.sqrt((x1 - x2)**2 + (y1 - y2)**2)
 
-st.set_page_config(page_title="AI Pathfinding", layout="wide")
-st.title("🤖 AI vs Algoritmalar: Yol Bulma Simülasyonu")
+def dijkstra_algo(graph, start, goal):
+    queue = [(0, start, [])]
+    visited = set()
+    expanded = 0
+    while queue:
+        cost, node, path = heapq.heappop(queue)
+        if node in visited: continue
+        visited.add(node)
+        expanded += 1
+        path = path + [node]
+        if node == goal: return cost, path, expanded
+        for neighbor, attr in graph[node].items():
+            if neighbor not in visited:
+                heapq.heappush(queue, (cost + attr['weight'], neighbor, path))
+    return float('inf'), [], expanded
 
-# Sidebar
-st.sidebar.header("Ayarlar")
-model_path = "Model3_3.pt"
-model, max_trained_nodes = load_model(model_path)
-
-if not model:
-    st.error("Model dosyası bulunamadı.")
-    st.stop()
-
-st.sidebar.info(f"Yüklü Model Kapasitesi: {max_trained_nodes} Node")
-
-# Harita Ayarları
-# Kullanıcı modelin kapasitesinden fazla node seçerse hata alır, o yüzden max değeri sınırlıyoruz.
-num_nodes = st.sidebar.slider("Düğüm Sayısı", 5, max_trained_nodes, 15)
-edge_prob = st.sidebar.slider("Bağlantı Sıklığı", 0.1, 1.0, 0.25)
-seed = st.sidebar.number_input("Rastgelelik Tohumu (Seed)", 1, 1000, 42)
-
-if st.sidebar.button("Harita Oluştur / Yenile"):
-    # Rastgele Graf
-    G = nx.erdos_renyi_graph(n=num_nodes, p=edge_prob, seed=seed)
+def a_star_algo(graph, start, goal, positions):
+    queue = [(0, 0, start, [])] 
+    visited = set()
+    expanded = 0
+    g_scores = {node: float('inf') for node in graph.nodes}
+    g_scores[start] = 0
     
-    # İzole düğümleri bağla (Graph connected olsun)
+    while queue:
+        _, current_g, node, path = heapq.heappop(queue)
+        if node == goal: return current_g, path + [node], expanded
+        if current_g > g_scores[node]: continue
+        visited.add(node)
+        expanded += 1
+        path = path + [node]
+        for neighbor, attr in graph[node].items():
+            weight = attr['weight']
+            new_g = current_g + weight
+            if new_g < g_scores[neighbor]:
+                g_scores[neighbor] = new_g
+                h = euclidean_dist(neighbor, goal, positions)
+                heapq.heappush(queue, (new_g + h, new_g, neighbor, path))
+    return float('inf'), [], expanded
+
+def bellman_ford_algo(graph, start, goal):
+    dist = {node: float('inf') for node in graph.nodes}
+    pred = {node: None for node in graph.nodes}
+    dist[start] = 0
+    expanded = 0
+    nodes = list(graph.nodes)
+    edges = list(graph.edges(data=True))
+    for _ in range(len(nodes) - 1):
+        change = False
+        for u, v, data in edges:
+            expanded += 1
+            w = data['weight']
+            if dist[u] + w < dist[v]:
+                dist[v] = dist[u] + w
+                pred[v] = u
+                change = True
+            elif dist[v] + w < dist[u]:
+                dist[u] = dist[v] + w
+                pred[u] = v
+                change = True
+        if not change: break
+    if dist[goal] == float('inf'): return float('inf'), [], expanded
+    path = []
+    curr = goal
+    while curr is not None:
+        path.insert(0, curr)
+        if curr == start: break
+        curr = pred[curr]
+    return dist[goal], path, expanded
+
+def create_graph(num_nodes, k_neighbors, min_w, max_w):
+    G = nx.Graph()
+    pos = {}
+    for i in range(num_nodes):
+        pos[i] = (random.randint(0, 1000), random.randint(0, 1000))
+        G.add_node(i, pos=pos[i])
+    for i in range(num_nodes):
+        dists = []
+        x1, y1 = pos[i]
+        for j in range(num_nodes):
+            if i == j: continue
+            x2, y2 = pos[j]
+            d = math.sqrt((x1-x2)**2 + (y1-y2)**2)
+            dists.append((d, j))
+        dists.sort(key=lambda x: x[0])
+        for _, neighbor in dists[:k_neighbors]:
+            if not G.has_edge(i, neighbor):
+                G.add_edge(i, neighbor, weight=random.randint(min_w, max_w))
     if not nx.is_connected(G):
-        components = list(nx.connected_components(G))
-        for i in range(len(components)-1):
-            # Her bileşenden bir düğümü diğerine bağla
-            u = list(components[i])[0]
-            v = list(components[i+1])[0]
-            G.add_edge(u, v)
+        comps = list(nx.connected_components(G))
+        for k in range(len(comps)-1):
+            u, v = list(comps[k])[0], list(comps[k+1])[0]
+            G.add_edge(u, v, weight=random.randint(min_w, max_w))
+    return G, pos
 
-    # Ağırlık ata
-    np.random.seed(seed)
-    for (u, v) in G.edges():
-        G.edges[u, v]['weight'] = np.random.randint(1, 20)
-        
-    pos = nx.spring_layout(G, seed=seed)
-    st.session_state['G'] = G
-    st.session_state['pos'] = pos
-    st.session_state['map_ready'] = True
-
-if 'map_ready' in st.session_state:
-    G = st.session_state['G']
-    pos = st.session_state['pos']
+# --- 3. SIDEBAR ---
+with st.sidebar:
+    st.image("https://upload.wikimedia.org/wikipedia/tr/6/62/Gazi_%C3%9Cniversitesi_Logosu.png", width=100)
+    st.title("Algoritmalar")
+    st.markdown("---")
     
-    col1, col2 = st.columns([1, 3])
+    st.markdown("### ⚙️ Ayarlar")
     
-    with col1:
-        st.subheader("Rota Belirle")
-        nodes = list(G.nodes())
-        start_node = st.selectbox("Başlangıç", nodes, index=0)
-        end_node = st.selectbox("Bitiş", nodes, index=len(nodes)-1)
+    with st.expander("🌍 Harita Konfigürasyonu", expanded=True):
+        node_count = st.slider("Şehir Sayısı", 20, 300, 80)
+        edge_density = st.slider("Bağlantı Yoğunluğu", 2, 8, 3)
+    
+    with st.expander("⚖️ Yol Maliyetleri", expanded=False):
+        min_w = st.number_input("Min Ağırlık", 1, 50, 1)
+        max_w = st.number_input("Max Ağırlık", 1, 50, 50)
+    
+    # BU KISIMDAKİ YAZILAR ARTIK GRİ OLACAK
+    st.markdown("### 👁️ Görünüm")
+    selected_algo_view = st.selectbox(
+        "Rotayı Göster:",
+        ["Karşılaştırmalı (Hepsi)", "Sadece Dijkstra", "Sadece A*", "Sadece Bellman-Ford"]
+    )
+    
+    st.markdown("---")
+    if st.button("🔄 Haritayı Yeniden Oluştur"):
+        st.session_state['G'], st.session_state['pos'] = create_graph(node_count, edge_density, min_w, max_w)
+        st.rerun()
+
+# --- 4. ANA EKRAN ---
+
+if 'G' not in st.session_state:
+    st.session_state['G'], st.session_state['pos'] = create_graph(node_count, edge_density, min_w, max_w)
+
+G = st.session_state['G']
+pos = st.session_state['pos']
+nodes = list(G.nodes)
+start_node = nodes[0]
+end_node = nodes[-1]
+
+# Hesaplamalar
+results = []
+
+# Dijkstra
+t1 = time.perf_counter()
+d_cost, d_path, d_exp = dijkstra_algo(G, start_node, end_node)
+d_time = (time.perf_counter() - t1) * 1000
+results.append({"Algoritma": "Dijkstra", "Süre (ms)": d_time, "Maliyet": d_cost, "Genişletilen": d_exp, "Yol": d_path})
+
+# A*
+t1 = time.perf_counter()
+a_cost, a_path, a_exp = a_star_algo(G, start_node, end_node, pos)
+a_time = (time.perf_counter() - t1) * 1000
+results.append({"Algoritma": "A*", "Süre (ms)": a_time, "Maliyet": a_cost, "Genişletilen": a_exp, "Yol": a_path})
+
+# Bellman-Ford
+if node_count <= 200: 
+    t1 = time.perf_counter()
+    b_cost, b_path, b_exp = bellman_ford_algo(G, start_node, end_node)
+    b_time = (time.perf_counter() - t1) * 1000
+    results.append({"Algoritma": "Bellman-Ford", "Süre (ms)": b_time, "Maliyet": b_cost, "Genişletilen": b_exp, "Yol": b_path})
+else:
+    results.append({"Algoritma": "Bellman-Ford", "Süre (ms)": 0, "Maliyet": 0, "Genişletilen": 0, "Yol": []})
+
+df_res = pd.DataFrame(results)
+
+# --- HARİTA GÖRSELLEŞTİRME ---
+st.subheader("📍 Simülasyon Haritası")
+
+with st.container():
+    st.markdown('<div class="map-container">', unsafe_allow_html=True)
+    
+    plt.figure(figsize=(14, 7))
+    fig, ax = plt.subplots(figsize=(14, 7))
+    fig.patch.set_facecolor(COLOR_BG_LIGHT)
+    ax.set_facecolor(COLOR_BG_LIGHT)
+
+    # --- HARİTA ÇERÇEVESİ EKLENDİ ---
+    ax.set_xticks([])
+    ax.set_yticks([])
+    for spine in ax.spines.values():
+        spine.set_visible(True)  # Çerçeveyi görünür yap
+        spine.set_color(COLOR_SIDEBAR_BG) # Koyu mavi renk
+        spine.set_linewidth(3)   # Kalınlık
+
+    # Ağ Çizimi
+    nx.draw_networkx_nodes(G, pos, node_size=60, node_color=COLOR_NODE_BRIGHT, ax=ax, alpha=0.9)
+    nx.draw_networkx_edges(G, pos, edge_color=COLOR_EDGE_LIGHT, alpha=0.6, width=1, ax=ax)
+
+    # Başlangıç ve Bitiş
+    nx.draw_networkx_nodes(G, pos, nodelist=[start_node], node_color="white", edgecolors=COLOR_SIDEBAR_BG, linewidths=3, node_size=250, ax=ax, label="Başlangıç")
+    nx.draw_networkx_nodes(G, pos, nodelist=[end_node], node_color=COLOR_ACCENT_RED, edgecolors="white", linewidths=2, node_size=250, ax=ax, label="Hedef")
+
+    path_width = 4
+
+    # Rotalar
+    if "Dijkstra" in selected_algo_view or "Hepsi" in selected_algo_view:
+        if d_path:
+            edges = list(zip(d_path, d_path[1:]))
+            nx.draw_networkx_edges(G, pos, edgelist=edges, edge_color=COLOR_SIDEBAR_BG, width=path_width+1, alpha=0.7, label="Dijkstra", ax=ax)
+            
+    if "Bellman" in selected_algo_view or "Hepsi" in selected_algo_view:
+        if len(results) > 2 and results[2]["Yol"]:
+            path = results[2]["Yol"]
+            edges = list(zip(path, path[1:]))
+            nx.draw_networkx_edges(G, pos, edgelist=edges, edge_color='#9B59B6', width=path_width-1, style='dotted', label="Bellman-Ford", ax=ax)
+
+    if "A*" in selected_algo_view or "Hepsi" in selected_algo_view:
+        if a_path:
+            edges = list(zip(a_path, a_path[1:]))
+            color = '#F39C12' if a_cost > d_cost else COLOR_ACCENT_RED
+            style = 'dashed'
+            nx.draw_networkx_edges(G, pos, edgelist=edges, edge_color=color, width=path_width, style=style, label="A*", ax=ax)
+
+    # Lejant
+    legend = ax.legend(
+        loc='upper left', 
+        frameon=True, 
+        facecolor='white', 
+        edgecolor=COLOR_SIDEBAR_BG,
+        framealpha=1,
+        labelcolor='black',
+        fontsize=11,
+        borderpad=1
+    )
+    
+    st.pyplot(fig, use_container_width=True)
+    st.markdown('</div>', unsafe_allow_html=True)
+
+if a_cost > d_cost:
+    st.error(f"⚠️ A* Algoritması {a_cost - d_cost:.1f} birim daha maliyetli bir yol buldu! (Heuristic Yanılgısı)")
+
+st.divider()
+
+# --- ANALİZ BÖLÜMÜ ---
+st.subheader("📊 Performans Analizi")
+
+col_stats, col_charts = st.columns([1, 1], gap="large")
+
+with col_stats:
+    st.markdown("##### 📝 Sonuç Tablosu")
+    st.dataframe(
+        df_res[["Algoritma", "Süre (ms)", "Maliyet", "Genişletilen"]].style.format({"Süre (ms)": "{:.2f}"}),
+        use_container_width=True,
+        hide_index=True
+    )
+
+with col_charts:
+    st.markdown("##### ⏱️ Grafiksel Karşılaştırma")
+    tab1, tab2 = st.tabs(["Zaman (ms)", "İşlem Yükü"])
+    
+    chart_text_color = COLOR_CHART_TEXT
+    
+    # Altair Eksen Konfigürasyonu
+    axis_config = alt.Axis(
+        labelColor=chart_text_color, 
+        titleColor=chart_text_color, 
+        gridColor="#CFD8DC"
+    )
+
+    with tab1:
+        # Zaman Grafiği
+        chart_time = alt.Chart(df_res).mark_bar(color=COLOR_SIDEBAR_BG, cornerRadiusEnd=5).encode(
+            x=alt.X('Süre (ms)', axis=axis_config),
+            y=alt.Y('Algoritma', axis=axis_config, sort='-x'),
+            tooltip=['Algoritma', alt.Tooltip('Süre (ms)', format='.2f')]
+        ).properties(
+            height=250,
+            background='transparent'
+        ).configure_text(color=chart_text_color).configure_axis(
+            labelColor=chart_text_color,
+            titleColor=chart_text_color
+        )
+        st.altair_chart(chart_time, use_container_width=True)
         
-        if st.button("Başlat"):
-            results = []
-            
-            # --- 1. Klasik Algoritmalar ---
-            try:
-                path = nx.dijkstra_path(G, start_node, end_node, weight='weight')
-                dist = nx.dijkstra_path_length(G, start_node, end_node, weight='weight')
-                results.append(("Dijkstra (Optimal)", path, dist, 'red', 'solid'))
-            except:
-                results.append(("Dijkstra", [], float('inf'), 'red', 'solid'))
-
-            try:
-                path = nx.astar_path(G, start_node, end_node, weight='weight')
-                dist = sum(G[u][v]['weight'] for u, v in zip(path[:-1], path[1:]))
-                results.append(("A*", path, dist, 'blue', 'dashed'))
-            except: pass
-
-            try:
-                path = nx.bellman_ford_path(G, start_node, end_node, weight='weight')
-                dist = sum(G[u][v]['weight'] for u, v in zip(path[:-1], path[1:]))
-                results.append(("Bellman-Ford", path, dist, 'purple', 'dotted'))
-            except: pass
-
-            # --- 2. AI Model ---
-            try:
-                ai_path = run_ai_inference_strict(model, G, start_node, end_node, max_trained_nodes)
-                
-                # AI yol maliyeti hesapla
-                ai_dist = 0
-                is_valid = True
-                if len(ai_path) < 2 or ai_path[-1] != end_node:
-                    is_valid = False
-                
-                for u, v in zip(ai_path[:-1], ai_path[1:]):
-                    if G.has_edge(u, v):
-                        ai_dist += G[u][v]['weight']
-                    else:
-                        is_valid = False
-                        ai_dist = float('inf')
-                
-                label = "Yapay Zeka"
-                if not is_valid: label += " (Hedefe Ulaşamadı)"
-                
-                results.append((label, ai_path, ai_dist, 'green', 'dashdot'))
-                
-            except Exception as e:
-                st.error(f"AI Hatası: {e}")
-
-            # --- Görselleştirme ---
-            fig, ax = plt.subplots(figsize=(10, 6))
-            nx.draw(G, pos, ax=ax, with_labels=True, node_color='lightgray', edge_color='#cccccc', node_size=600)
-            edge_labels = nx.get_edge_attributes(G, 'weight')
-            nx.draw_networkx_edge_labels(G, pos, edge_labels=edge_labels, font_size=7)
-
-            st.write("### Sonuçlar Tablosu")
-            
-            cols = st.columns(len(results))
-            for idx, (name, path, dist, color, style) in enumerate(results):
-                # Tablo
-                val_str = f"{dist}" if dist != float('inf') else "Başarısız"
-                cols[idx].metric(name, val_str, f"{len(path)-1} Adım")
-                
-                # Çizim
-                if len(path) > 1:
-                    edges = list(zip(path[:-1], path[1:]))
-                    # Çakışmayı önlemek için her çizgiyi biraz kaydır (offset) veya kalınlığı değiştir
-                    width = 6 - (idx * 1.5)
-                    alpha = 0.8 - (idx * 0.1)
-                    nx.draw_networkx_edges(G, pos, edgelist=edges, edge_color=color, width=width, style=style, alpha=alpha, label=name)
-            
-            # Legend
-            from matplotlib.lines import Line2D
-            custom_lines = [Line2D([0], [0], color=r[3], lw=2, linestyle=r[4]) for r in results]
-            ax.legend(custom_lines, [r[0] for r in results], loc='upper left')
-            
-            st.pyplot(fig)
-
-    with col2:
-        # Harita önizleme (Boş halini göstermek için)
-        if 'map_ready' in st.session_state and not st.button("Sonuçları Temizle", key="clean"):
-            pass
+    with tab2:
+        # İşlem Yükü Grafiği
+        chart_exp = alt.Chart(df_res).mark_bar(color=COLOR_ACCENT_RED, cornerRadiusEnd=5).encode(
+            x=alt.X('Genişletilen', axis=axis_config, title='Genişletilen Düğüm Sayısı'),
+            y=alt.Y('Algoritma', axis=axis_config, sort='-x'),
+            tooltip=['Algoritma', 'Genişletilen']
+        ).properties(
+            height=250,
+            background='transparent'
+        ).configure_axis(
+            labelColor=chart_text_color,
+            titleColor=chart_text_color
+        )
+        st.altair_chart(chart_exp, use_container_width=True)
