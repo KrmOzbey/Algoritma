@@ -2,3 +2,8 @@ streamlit
 networkx
 matplotlib
 pandas
+altair
+torch
+torch-geometric
+numpy
+scipy
