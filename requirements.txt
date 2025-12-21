@@ -1,9 +1,7 @@
 streamlit
-networkx
-matplotlib
-pandas
-altair
 torch
 torch-geometric
+networkx
+matplotlib
 numpy
 scipy
