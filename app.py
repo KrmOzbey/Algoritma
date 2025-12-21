@@ -11,7 +11,6 @@ import torch
 import torch.nn as nn
 import numpy as np
 from torch_geometric.data import Data
-# GCNConv modelinize uygun olarak:
 from torch_geometric.nn import GCNConv
 
 # --- 1. SAYFA VE STİL AYARLARI ---
@@ -30,7 +29,7 @@ COLOR_ACCENT_RED = "#C0392B"
 COLOR_NODE_BRIGHT = "#3498DB"   
 COLOR_EDGE_LIGHT = "#CFD8DC"    
 COLOR_CHART_TEXT = "#546E7A"    
-COLOR_AI_CYAN = "#00E5FF" # Yapay Zeka Rengi (Neon Turkuaz)
+COLOR_AI_CYAN = "#00E5FF" 
 
 # Özel CSS
 st.markdown(f"""
@@ -62,9 +61,7 @@ st.markdown(f"""
     </style>
 """, unsafe_allow_html=True)
 
-# --- 2. YAPAY ZEKA MODEL MİMARİSİ (Eğitim Kodundan Alındı) ---
-# DİKKAT: Buradaki parametreler (hidden_channels=256 vb.) eğitimdeki ile AYNI olmalıdır.
-
+# --- 2. YAPAY ZEKA MODEL MİMARİSİ ---
 class Encoder(nn.Module):
     def __init__(self, in_channels, hidden_channels, out_channels):
         super().__init__()
@@ -72,7 +69,7 @@ class Encoder(nn.Module):
         self.bn1 = nn.BatchNorm1d(hidden_channels)
         self.gcn2 = GCNConv(hidden_channels, hidden_channels)
         self.bn2 = nn.BatchNorm1d(hidden_channels)
-        self.dropout = nn.Dropout(0.2) # dropout_p
+        self.dropout = nn.Dropout(0.2)
         self.fc = nn.Linear(hidden_channels, out_channels)
 
     def forward(self, x, edge_index, edge_attr=None):
@@ -92,79 +89,110 @@ class Decoder(nn.Module):
         self.fc_out = nn.Linear(hidden_dim, out_dim)
 
 class GNNPathModel(nn.Module):
-    def __init__(self, in_channels, hidden_channels, out_channels, num_nodes, max_path_len):
+    # lstm_hidden_dim parametresi eklendi ve varsayılan 512 yapıldı
+    def __init__(self, in_channels, hidden_channels, out_channels, num_nodes, max_path_len, lstm_hidden_dim=512):
         super().__init__()
         self.encoder = Encoder(in_channels, hidden_channels, num_nodes)
-        self.decoder = Decoder(num_nodes, 512, num_nodes) # lstm_hidden_dim = 512
+        self.decoder = Decoder(num_nodes, lstm_hidden_dim, num_nodes)
 
-# --- Model Yükleme ve Veri Hazırlama Yardımcıları ---
-
+# --- Akıllı Model Yükleyici ---
 @st.cache_resource
 def load_ai_model():
-    # EĞİTİMDE KULLANILAN SABİTLER (Bunları eğitim kodunuzdan teyit edin)
-    TRAIN_NUM_NODES = 81  # Örneğin 81 il ile eğittiyseniz
-    HIDDEN_CHANNELS = 256
-    IN_CHANNELS = 6       # 4 Feature (Degree, Cent, Clust, Page) + 2 Mask
-    
-    # Model mimarisini başlat
-    model = GNNPathModel(
-        in_channels=IN_CHANNELS, 
-        hidden_channels=HIDDEN_CHANNELS, 
-        out_channels=TRAIN_NUM_NODES, # Output layer boyutu eğitimdeki node sayısına sabitlenir
-        num_nodes=TRAIN_NUM_NODES,
-        max_path_len=50 # Tahmini
-    )
+    model_path = 'Model3_2.pt'
     
     try:
-        # GitHub'a yüklediğiniz model dosyasının adı
-        model.load_state_dict(torch.load('Model3_2.pt', map_location=torch.device('cpu')))
+        # 1. Önce sadece ağırlıkları (state_dict) yükle
+        state_dict = torch.load(model_path, map_location=torch.device('cpu'))
+        
+        # 2. Modelin boyutlarını dosyanın içinden otomatik öğren
+        detected_num_nodes = 0
+        detected_hidden_dim = 256
+        detected_lstm_dim = 512
+
+        if 'encoder.fc.weight' in state_dict:
+            weight_shape = state_dict['encoder.fc.weight'].shape
+            detected_num_nodes = weight_shape[0]      # Otomatik algılanan node sayısı
+            detected_hidden_dim = weight_shape[1]     # Otomatik algılanan hidden size
+            
+            # LSTM boyutunu da öğrenelim
+            if 'decoder.fc_out.weight' in state_dict:
+                lstm_shape = state_dict['decoder.fc_out.weight'].shape
+                detected_lstm_dim = lstm_shape[1]
+                
+            # print(f"✅ Model Analizi Başarılı: {detected_num_nodes} Node, {detected_hidden_dim} Hidden, {detected_lstm_dim} LSTM")
+        else:
+            st.error("Model dosya yapısı beklenenden farklı. Lütfen eğitim kodunu kontrol edin.")
+            return None, 0
+
+        # 3. Öğrenilen boyutlara göre boş modeli yarat
+        IN_CHANNELS = 6  # (Degree, Cent, Clust, Page, StartMask, EndMask) sabit
+        
+        model = GNNPathModel(
+            in_channels=IN_CHANNELS, 
+            hidden_channels=detected_hidden_dim, 
+            out_channels=detected_num_nodes,
+            num_nodes=detected_num_nodes,
+            max_path_len=50,
+            lstm_hidden_dim=detected_lstm_dim 
+        )
+        
+        # 4. Ağırlıkları yükle
+        model.load_state_dict(state_dict)
         model.eval()
-        return model, TRAIN_NUM_NODES
+        
+        return model, detected_num_nodes
+
     except FileNotFoundError:
-        return None, TRAIN_NUM_NODES
+        # GitHub ortamında dosya yoksa sessizce geçebilir veya hata verebiliriz
+        # st.error(f"Model dosyası ({model_path}) bulunamadı.")
+        return None, 0
+    except Exception as e:
+        st.error(f"Model yüklenirken beklenmedik bir hata oluştu: {e}")
+        return None, 0
 
 def prepare_data_for_ai(G, start_node, end_node, train_num_nodes):
-    # NetworkX özelliklerini çıkar (Eğitimdeki gibi)
     num_nodes_current = len(G.nodes)
     
-    # Eğer harita, modelin eğitildiği boyuttan büyükse model çalışamaz (Fixed Output Layer)
-    # Bu yüzden sadece modelin kapasitesi dahilindeyse çalıştıracağız.
-    
+    # Feature hesaplama
     degree = np.array([val for (node, val) in G.degree()])
     try:
         centrality = np.array([val for (node, val) in nx.betweenness_centrality(G).items()])
         clustering = np.array([val for (node, val) in nx.clustering(G).items()])
         pagerank = np.array([val for (node, val) in nx.pagerank(G).items()])
     except:
-        # Hata durumunda dummy veri
         centrality = np.zeros(num_nodes_current)
         clustering = np.zeros(num_nodes_current)
         pagerank = np.zeros(num_nodes_current)
 
-    # Feature Matrix (N x 4)
     features = np.column_stack((degree, centrality, clustering, pagerank))
     base_features = torch.tensor(features, dtype=torch.float)
     
-    # Maskeler (Start/End)
     start_mask = torch.zeros(num_nodes_current, 1)
     end_mask = torch.zeros(num_nodes_current, 1)
     start_mask[start_node] = 1
     end_mask[end_node] = 1
     
-    # Tüm featureları birleştir (N x 6)
     x = torch.cat([base_features, start_mask, end_mask], dim=1)
+    
+    # Padding: Eğer harita modelden küçükse, boşlukları doldur
+    if num_nodes_current < train_num_nodes:
+        pad_size = train_num_nodes - num_nodes_current
+        x_pad = torch.zeros(pad_size, x.size(1))
+        x = torch.cat([x, x_pad], dim=0)
     
     # Edge Index
     edges = list(G.edges)
-    edge_index = torch.tensor(edges, dtype=torch.long).t().contiguous()
-    # Yönsüz graf olduğu için ters yönleri de ekleyelim
-    edge_index_rev = torch.stack([edge_index[1], edge_index[0]], dim=0)
-    edge_index = torch.cat([edge_index, edge_index_rev], dim=1)
+    if not edges: # Kenar yoksa dummy edge
+        edge_index = torch.tensor([[0], [0]], dtype=torch.long)
+    else:
+        edge_index = torch.tensor(edges, dtype=torch.long).t().contiguous()
+        edge_index_rev = torch.stack([edge_index[1], edge_index[0]], dim=0)
+        edge_index = torch.cat([edge_index, edge_index_rev], dim=1)
     
     return x, edge_index
 
 def run_ai_inference(model, G, start_node, end_node, train_num_nodes):
-    # Eğer haritadaki düğüm sayısı modelin output layerından büyükse tahmin yapamayız
+    # Eğer harita, modelin kapasitesinden büyükse çalıştıramayız
     if len(G.nodes) > train_num_nodes:
         return 0, [], False
         
@@ -174,40 +202,43 @@ def run_ai_inference(model, G, start_node, end_node, train_num_nodes):
     path = [start_node]
     
     with torch.no_grad():
-        # Encoder
         node_emb = model.encoder(x, edge_index)
         
-        # Decoder (LSTM Loop)
         input_emb = node_emb[start_node].unsqueeze(0).unsqueeze(0)
         hidden = None
         visited = set([start_node])
         curr = start_node
         
-        # Max 50 adım tahmin et
         for _ in range(50):
             out, hidden = model.decoder.lstm(input_emb, hidden)
             logits = model.decoder.fc_out(out.squeeze(1))
             
-            # Maskeleme (Gidilebilecek komşular)
+            # Sadece mevcut haritadaki komşulara gitmesine izin ver
             neighbors = list(G.neighbors(curr))
             allowed = set(neighbors) - visited
             if end_node in neighbors: allowed.add(end_node)
             
-            if not allowed: break # Gidecek yer yok
+            if not allowed: break
             
-            # Logits maskeleme (sadece allowed indexler kalsın)
+            # Logits maskeleme
             full_mask = torch.ones_like(logits) * -float('inf')
             allowed_indices = torch.tensor(list(allowed), dtype=torch.long)
-            full_mask[0, allowed_indices] = logits[0, allowed_indices]
             
-            pred_node = full_mask.argmax(dim=-1).item()
+            # Model boyutu büyük olsa bile biz sadece geçerli indexlere bakacağız
+            valid_indices = allowed_indices[allowed_indices < logits.size(1)]
             
-            path.append(pred_node)
-            visited.add(pred_node)
-            curr = pred_node
-            input_emb = node_emb[pred_node].unsqueeze(0).unsqueeze(0)
-            
-            if curr == end_node:
+            if len(valid_indices) > 0:
+                full_mask[0, valid_indices] = logits[0, valid_indices]
+                pred_node = full_mask.argmax(dim=-1).item()
+                
+                path.append(pred_node)
+                visited.add(pred_node)
+                curr = pred_node
+                input_emb = node_emb[pred_node].unsqueeze(0).unsqueeze(0)
+                
+                if curr == end_node:
+                    break
+            else:
                 break
                 
     t_end = time.perf_counter()
@@ -319,7 +350,7 @@ with st.sidebar:
     st.markdown("---")
     
     with st.expander("🌍 Harita Konfigürasyonu", expanded=True):
-        node_count = st.slider("Şehir Sayısı", 20, 300, 80)
+        node_count = st.slider("Şehir Sayısı", 20, 200, 50) 
         edge_density = st.slider("Bağlantı Yoğunluğu", 2, 8, 3)
     
     with st.expander("⚖️ Yol Maliyetleri", expanded=False):
@@ -337,7 +368,7 @@ with st.sidebar:
         st.session_state['G'], st.session_state['pos'] = create_graph(node_count, edge_density, min_w, max_w)
         st.rerun()
 
-# --- 5. ANA EKRAN VE ÇALIŞTIRMA ---
+# --- 5. ANA EKRAN ---
 
 if 'G' not in st.session_state:
     st.session_state['G'], st.session_state['pos'] = create_graph(node_count, edge_density, min_w, max_w)
@@ -351,7 +382,12 @@ end_node = nodes[-1]
 # Model Yükleme
 ai_model, train_num_nodes = load_ai_model()
 
-# Sonuçları Hesapla
+# Kullanıcı Uyarıları
+if ai_model is None:
+    st.toast("Yapay Zeka modeli (Model3_2.pt) yüklenemedi.", icon="⚠️")
+elif node_count > train_num_nodes:
+    st.warning(f"⚠️ DİKKAT: Yapay Zeka modeli {train_num_nodes} şehir ile eğitilmiştir. Şu anki harita ({node_count} şehir) model kapasitesini aştığı için AI devre dışı kalacaktır.", icon="⚠️")
+
 results = []
 
 # 1. Dijkstra
@@ -375,25 +411,18 @@ if node_count <= 200:
 else:
     results.append({"Algoritma": "Bellman-Ford", "Süre (ms)": 0, "Maliyet": 0, "Genişletilen": 0, "Yol": []})
 
-# 4. Yapay Zeka (GNN + LSTM)
+# 4. Yapay Zeka
 if ai_model is not None:
     ai_time, ai_path, success = run_ai_inference(ai_model, G, start_node, end_node, train_num_nodes)
     
-    # AI maliyeti (Bulduğu yolun ağırlıklarını topla)
     ai_cost = 0
     if ai_path:
         for i in range(len(ai_path)-1):
             if G.has_edge(ai_path[i], ai_path[i+1]):
                 ai_cost += G[ai_path[i]][ai_path[i+1]]['weight']
-                
+    
     if success:
         results.append({"Algoritma": "Yapay Zeka (GNN)", "Süre (ms)": ai_time, "Maliyet": ai_cost, "Genişletilen": 0, "Yol": ai_path})
-    else:
-        # Eğer node sayısı modelin limitini aşarsa
-        st.toast(f"AI Model {train_num_nodes} node ile eğitildi, şu an {len(G.nodes)} node var. AI devre dışı.", icon="⚠️")
-else:
-    # Model dosyası yoksa
-    st.toast("Model dosyası (Model3_2.pt) bulunamadı.", icon="📁")
 
 df_res = pd.DataFrame(results)
 
@@ -414,17 +443,14 @@ with st.container():
         spine.set_color(COLOR_SIDEBAR_BG)
         spine.set_linewidth(3)
 
-    # Ağ Çizimi
     nx.draw_networkx_nodes(G, pos, node_size=60, node_color=COLOR_NODE_BRIGHT, ax=ax, alpha=0.9)
     nx.draw_networkx_edges(G, pos, edge_color=COLOR_EDGE_LIGHT, alpha=0.6, width=1, ax=ax)
 
-    # Başlangıç ve Bitiş
     nx.draw_networkx_nodes(G, pos, nodelist=[start_node], node_color="white", edgecolors=COLOR_SIDEBAR_BG, linewidths=3, node_size=250, ax=ax, label="Başlangıç")
     nx.draw_networkx_nodes(G, pos, nodelist=[end_node], node_color=COLOR_ACCENT_RED, edgecolors="white", linewidths=2, node_size=250, ax=ax, label="Hedef")
 
     path_width = 4
 
-    # Rotalar
     if "Dijkstra" in selected_algo_view or "Hepsi" in selected_algo_view:
         if d_path:
             edges = list(zip(d_path, d_path[1:]))
@@ -443,13 +469,11 @@ with st.container():
             style = 'dashed'
             nx.draw_networkx_edges(G, pos, edgelist=edges, edge_color=color, width=path_width, style=style, label="A*", ax=ax)
 
-    # YAPAY ZEKA GÖRSELLEŞTİRMESİ
     if "Yapay Zeka" in selected_algo_view or "Hepsi" in selected_algo_view:
         ai_res = next((r for r in results if r["Algoritma"] == "Yapay Zeka (GNN)"), None)
         if ai_res and ai_res["Yol"]:
             path = ai_res["Yol"]
             edges = list(zip(path, path[1:]))
-            # AI, en üste çizilir, parlak turkuaz
             nx.draw_networkx_edges(G, pos, edgelist=edges, edge_color=COLOR_AI_CYAN, width=path_width-1, style='solid', label="Yapay Zeka (GNN)", ax=ax)
 
     legend = ax.legend(loc='upper left', frameon=True, facecolor='white', edgecolor=COLOR_SIDEBAR_BG, framealpha=1, labelcolor='black', fontsize=11, borderpad=1)
@@ -487,7 +511,7 @@ with col_charts:
             tooltip=['Algoritma', alt.Tooltip('Süre (ms)', format='.2f')],
             color=alt.condition(
                 alt.datum.Algoritma == 'Yapay Zeka (GNN)',
-                alt.value(COLOR_AI_CYAN),  # AI için özel renk
+                alt.value(COLOR_AI_CYAN),
                 alt.value(COLOR_SIDEBAR_BG)
             )
         ).properties(height=250, background='transparent').configure_text(color=chart_text_color).configure_axis(
